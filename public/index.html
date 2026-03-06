@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>签到 + 习惯盲盒 v3.0（老师创建）</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card: #fff;
+      --line: #dbe3ee;
+      --text: #0f172a;
+      --muted: #64748b;
+      --brand: #0f766e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(600px 300px at 10% -10%, #d1fae5 0%, transparent 55%), var(--bg);
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 16px;
+    }
+    .card {
+      width: min(700px, 100%);
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: 0 10px 28px rgba(2, 6, 23, 0.08);
+    }
+    h1 { margin: 0 0 8px; font-size: 24px; }
+    p { margin: 0; color: var(--muted); font-size: 14px; }
+    textarea {
+      width: 100%;
+      margin-top: 14px;
+      min-height: 180px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 14px;
+    }
+    button {
+      margin-top: 12px;
+      border: 0;
+      background: var(--brand);
+      color: #fff;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .result {
+      margin-top: 16px;
+      border: 1px dashed var(--line);
+      border-radius: 10px;
+      padding: 12px;
+      display: none;
+      font-size: 14px;
+    }
+    .link {
+      display: block;
+      margin-top: 8px;
+      word-break: break-all;
+      color: #0369a1;
+    }
+    .tip { margin-top: 10px; font-size: 13px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>创建签到 + 盲盒 v3.0</h1>
+    <p>每行一个名字，创建后发学生链接。规则：先签到，再无限抽盲盒（全员可见）。</p>
+    <textarea id="names" placeholder="张三\n李四\n王五"></textarea>
+    <button id="createBtn">创建签到并生成链接</button>
+
+    <div id="result" class="result">
+      <div>老师统计页：</div>
+      <a id="adminLink" class="link" target="_blank" rel="noreferrer"></a>
+      <div style="margin-top:10px;">学生签到页（发群里）：</div>
+      <a id="checkinLink" class="link" target="_blank" rel="noreferrer"></a>
+      <button id="copyBtn" style="margin-top:10px;background:#334155;">复制学生签到链接</button>
+    </div>
+    <div class="tip">签到自动记录时间/位置/自拍；盲盒抽取次数不限并实时同步。</div>
+  </main>
+
+  <script>
+    const namesEl = document.getElementById('names');
+    const createBtn = document.getElementById('createBtn');
+    const result = document.getElementById('result');
+    const adminLink = document.getElementById('adminLink');
+    const checkinLink = document.getElementById('checkinLink');
+    const copyBtn = document.getElementById('copyBtn');
+
+    function listNames(raw) {
+      const arr = raw.split('\n').map(v => v.trim()).filter(Boolean);
+      return [...new Set(arr)];
+    }
+
+    createBtn.addEventListener('click', async () => {
+      const students = listNames(namesEl.value);
+      if (!students.length) {
+        alert('请先输入学生名单');
+        return;
+      }
+
+      createBtn.disabled = true;
+      createBtn.textContent = '创建中...';
+      try {
+        const res = await fetch('/api/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ students })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '创建失败');
+
+        const base = window.location.origin;
+        adminLink.href = base + data.adminUrl;
+        adminLink.textContent = base + data.adminUrl;
+        checkinLink.href = base + data.checkinUrl;
+        checkinLink.textContent = base + data.checkinUrl;
+        result.style.display = 'block';
+      } catch (err) {
+        alert(err.message || '创建失败');
+      } finally {
+        createBtn.disabled = false;
+        createBtn.textContent = '创建签到并生成链接';
+      }
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(checkinLink.textContent);
+        copyBtn.textContent = '已复制';
+        setTimeout(() => { copyBtn.textContent = '复制学生签到链接'; }, 1200);
+      } catch {
+        alert('复制失败，请手动复制链接');
+      }
+    });
+  </script>
+</body>
+</html>

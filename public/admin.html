@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>签到统计 v2.0</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card: #fff;
+      --line: #dbe3ee;
+      --text: #0f172a;
+      --muted: #64748b;
+      --ok: #16a34a;
+      --pending: #d97706;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      padding: 16px;
+    }
+    .wrap { max-width: 1060px; margin: 0 auto; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 10px;
+    }
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .stat b { display: block; margin-top: 4px; color: var(--text); font-size: 24px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      padding: 10px 6px;
+      font-size: 14px;
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 600; }
+    .ok { color: var(--ok); font-weight: 600; }
+    .pending { color: var(--pending); font-weight: 600; }
+    .small { font-size: 13px; color: var(--muted); }
+    .link { color: #0369a1; text-decoration: none; }
+    .thumb {
+      width: 56px;
+      height: 56px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+    }
+    .map-wrap {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-top: 10px;
+    }
+    .map-canvas {
+      height: 320px;
+      width: 100%;
+      background: #e2e8f0;
+    }
+    .fallback-grid {
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+    }
+    .fallback-item {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px;
+      background: #fff;
+    }
+    .fallback-item iframe {
+      width: 100%;
+      height: 160px;
+      border: 0;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="card">
+      <h2 style="margin:0 0 8px;">签到统计 v2.0</h2>
+      <div class="small">页面每 2 秒自动刷新</div>
+      <button id="exportBtn" style="margin-top:10px;border:0;border-radius:8px;padding:8px 10px;background:#0f766e;color:#fff;cursor:pointer;">导出 CSV</button>
+      <div class="stats" style="margin-top:10px;">
+        <div class="stat">应到<b id="total">0</b></div>
+        <div class="stat">已到<b id="checked">0</b></div>
+        <div class="stat">未到<b id="absent">0</b></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="small">签到地图（可缩放，点击标记看姓名/时间/自拍）</div>
+      <div class="map-wrap">
+        <div id="map" class="map-canvas"></div>
+      </div>
+      <div id="mapTip" class="small" style="margin-top:8px;">地图加载中...</div>
+      <div id="fallbackMaps" class="fallback-grid"></div>
+    </section>
+
+    <section class="card">
+      <table>
+        <thead>
+          <tr><th>姓名</th><th>状态</th><th>签到时间</th><th>签到位置</th><th>自拍</th></tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const sessionId = location.pathname.split('/').pop();
+    const totalEl = document.getElementById('total');
+    const checkedEl = document.getElementById('checked');
+    const absentEl = document.getElementById('absent');
+    const tbody = document.getElementById('tbody');
+    const exportBtn = document.getElementById('exportBtn');
+    const mapTip = document.getElementById('mapTip');
+    const fallbackMaps = document.getElementById('fallbackMaps');
+    let latest = null;
+    let map = null;
+    let markerLayer = null;
+
+    function fmt(iso) {
+      if (!iso) return '-';
+      return new Date(iso).toLocaleString('zh-CN', { hour12: false });
+    }
+
+    function fmtLocation(loc) {
+      if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return '-';
+      const lat = Number(loc.lat).toFixed(6);
+      const lng = Number(loc.lng).toFixed(6);
+      const map = `https://www.google.com/maps?q=${lat},${lng}`;
+      return `<a class="link" target="_blank" rel="noreferrer" href="${map}">${lat}, ${lng}</a>`;
+    }
+
+    function photoCell(photoDataUrl) {
+      if (!photoDataUrl) return '<span class="small">-</span>';
+      const safe = escapeHtml(photoDataUrl);
+      return `<a href="${safe}" target="_blank" rel="noreferrer"><img class="thumb" src="${safe}" alt="签到自拍" /></a>`;
+    }
+
+    function renderFallbackMaps(checked) {
+      if (!checked.length) {
+        fallbackMaps.innerHTML = '';
+        return;
+      }
+      fallbackMaps.innerHTML = checked.map(s => {
+        const lat = Number(s.checkinLocation.lat).toFixed(6);
+        const lng = Number(s.checkinLocation.lng).toFixed(6);
+        const src = `https://www.google.com/maps?q=${lat},${lng}&z=17&output=embed`;
+        return `
+          <div class="fallback-item">
+            <div class="small" style="margin-bottom:6px;"><b>${escapeHtml(s.name)}</b></div>
+            <iframe loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="${src}"></iframe>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function ensureMap() {
+      if (!window.L) {
+        mapTip.textContent = '地图脚本加载失败（CDN 访问受限），请刷新或切换网络后重试。';
+        return;
+      }
+      if (!window.L || map) return;
+      map = L.map('map');
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap'
+      }).addTo(map);
+      markerLayer = L.layerGroup().addTo(map);
+      map.setView([35.8617, 104.1954], 4);
+    }
+
+    function updateMap(data) {
+      const checked = data.students.filter(s => s.checkedIn && s.checkinLocation && Number.isFinite(s.checkinLocation.lat) && Number.isFinite(s.checkinLocation.lng));
+      renderFallbackMaps(checked);
+
+      ensureMap();
+      if (!map || !markerLayer) return;
+
+      markerLayer.clearLayers();
+
+      if (checked.length === 0) {
+        mapTip.textContent = '暂无已签到定位点';
+        return;
+      }
+
+      const bounds = [];
+      checked.forEach(s => {
+        const lat = Number(s.checkinLocation.lat);
+        const lng = Number(s.checkinLocation.lng);
+        bounds.push([lat, lng]);
+        const popup = `
+          <div style="min-width:170px;">
+            <div><b>${escapeHtml(s.name)}</b></div>
+            <div style="font-size:12px;color:#475569;margin-top:4px;">${escapeHtml(fmt(s.checkedInAt))}</div>
+            ${s.checkinPhoto ? `<img src="${escapeHtml(s.checkinPhoto)}" style="width:100%;margin-top:6px;border-radius:8px;border:1px solid #e2e8f0;" alt="自拍" />` : ''}
+          </div>
+        `;
+        L.marker([lat, lng]).addTo(markerLayer).bindPopup(popup);
+      });
+
+      mapTip.textContent = `已显示 ${checked.length} 个签到位置`;
+      if (bounds.length === 1) {
+        map.setView(bounds[0], 17);
+      } else {
+        map.fitBounds(bounds, { padding: [24, 24] });
+      }
+    }
+
+    async function fetchData() {
+      const res = await fetch(`/api/sessions/${sessionId}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '读取失败');
+      return data;
+    }
+
+    function render(data) {
+      latest = data;
+      totalEl.textContent = String(data.total);
+      checkedEl.textContent = String(data.checked);
+      absentEl.textContent = String(data.total - data.checked);
+
+      tbody.innerHTML = data.students.map(s => `
+        <tr>
+          <td>${escapeHtml(s.name)}</td>
+          <td class="${s.checkedIn ? 'ok' : 'pending'}">${s.checkedIn ? '已签到' : '未签到'}</td>
+          <td>${fmt(s.checkedInAt)}</td>
+          <td>${fmtLocation(s.checkinLocation)}</td>
+          <td>${photoCell(s.checkinPhoto)}</td>
+        </tr>
+      `).join('');
+      updateMap(data);
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    async function tick() {
+      try {
+        const data = await fetchData();
+        render(data);
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="5" class="pending">${err.message}</td></tr>`;
+      }
+    }
+
+    function csvLocation(loc) {
+      if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return '';
+      return `${Number(loc.lat).toFixed(6)},${Number(loc.lng).toFixed(6)}`;
+    }
+
+    function exportCSV() {
+      if (!latest) return;
+      const rows = [['姓名', '状态', '签到时间', '签到位置(纬度,经度)', '是否有自拍']];
+      latest.students.forEach(s => {
+        rows.push([
+          s.name,
+          s.checkedIn ? '已签到' : '未签到',
+          fmt(s.checkedInAt),
+          csvLocation(s.checkinLocation),
+          s.checkinPhoto ? '是' : '否'
+        ]);
+      });
+      const csv = rows
+        .map(cols => cols.map(v => `"${String(v ?? '').replaceAll('"', '""')}"`).join(','))
+        .join('\n');
+      const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `签到统计_${sessionId}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    exportBtn.addEventListener('click', exportCSV);
+    tick();
+    setInterval(tick, 2000);
+  </script>
+</body>
+</html>

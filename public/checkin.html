@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>学生签到 + 习惯盲盒 v3.0</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    :root {
+      --bg: #f1f5f9;
+      --card: #fff;
+      --line: #dbe3ee;
+      --text: #0f172a;
+      --muted: #64748b;
+      --brand: #0ea5a4;
+      --ok: #16a34a;
+      --pending: #d97706;
+      --danger: #dc2626;
+      --box: #7c3aed;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      padding: 16px;
+    }
+    .wrap { max-width: 980px; margin: 0 auto; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+      margin-bottom: 12px;
+    }
+    h1 { margin: 0 0 8px; font-size: 24px; }
+    p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 10px;
+    }
+    .left, .right { min-width: 0; }
+    @media (max-width: 860px) {
+      .controls { grid-template-columns: 1fr; }
+    }
+    select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 15px;
+    }
+    button {
+      width: 100%;
+      margin-top: 10px;
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 15px;
+      cursor: pointer;
+      color: #fff;
+      background: var(--brand);
+    }
+    .btn-secondary {
+      background: #334155;
+    }
+    .camera-wrap {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      background: #0b1220;
+      position: relative;
+      min-height: 220px;
+      display: grid;
+      place-items: center;
+    }
+    video {
+      width: 100%;
+      height: auto;
+      display: block;
+      transform: scaleX(-1);
+    }
+    .camera-tip {
+      color: #cbd5e1;
+      font-size: 13px;
+      padding: 8px;
+      text-align: center;
+    }
+    .preview {
+      width: 100%;
+      max-height: 220px;
+      object-fit: cover;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      margin-top: 10px;
+      display: none;
+    }
+    .msg {
+      margin-top: 12px;
+      padding: 10px;
+      border-radius: 10px;
+      font-size: 14px;
+      display: none;
+    }
+    .ok-msg { background: #dcfce7; color: #166534; }
+    .err-msg { background: #fee2e2; color: #991b1b; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      padding: 10px 6px;
+      font-size: 14px;
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 600; }
+    .ok { color: var(--ok); font-weight: 600; }
+    .pending { color: var(--pending); font-weight: 600; }
+    .small { color: var(--muted); font-size: 13px; }
+    .link { color: #0369a1; text-decoration: none; }
+    .thumb {
+      width: 54px;
+      height: 54px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+    }
+    .missing { color: var(--danger); }
+    .map-wrap {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-top: 10px;
+    }
+    .map-canvas {
+      height: 320px;
+      width: 100%;
+      background: #e2e8f0;
+    }
+    .fallback-grid {
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+    }
+    .fallback-item {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px;
+      background: #fff;
+    }
+    .fallback-item iframe {
+      width: 100%;
+      height: 160px;
+      border: 0;
+      border-radius: 8px;
+    }
+    .blindbox-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    }
+    .draw-btn {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 14px;
+      cursor: pointer;
+      color: #fff;
+      background: var(--box);
+      width: auto;
+      margin: 0;
+    }
+    .draw-result {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: #f8f7ff;
+      color: #1e1b4b;
+      margin-bottom: 10px;
+      display: none;
+    }
+    .draw-title {
+      margin: 0 0 4px;
+      font-weight: 700;
+      font-size: 16px;
+      color: #5b21b6;
+    }
+    .draw-feed {
+      max-height: 280px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+    }
+    .draw-item {
+      padding: 10px;
+      border-bottom: 1px dashed var(--line);
+      font-size: 14px;
+    }
+    .draw-item:last-child {
+      border-bottom: 0;
+    }
+    .draw-meta {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="card">
+      <h1>学生签到 + 习惯盲盒 v3.0</h1>
+      <p>先签到（定位+拍照）再抽盲盒。盲盒抽取次数不限，全员可见实时抽卡记录。</p>
+
+      <div class="controls">
+        <div class="left">
+          <label class="small" for="nameSelect">选择姓名</label>
+          <select id="nameSelect"></select>
+          <button id="checkBtn">签到（定位+拍照）</button>
+          <div id="msg" class="msg"></div>
+        </div>
+
+        <div class="right">
+          <div class="camera-wrap" id="cameraWrap">
+            <video id="video" autoplay playsinline muted></video>
+            <div class="camera-tip" id="cameraTip">请允许摄像头权限后拍照</div>
+          </div>
+          <button id="captureBtn" class="btn-secondary">拍照</button>
+          <img id="photoPreview" class="preview" alt="自拍预览" />
+          <div id="photoStatus" class="small missing">未拍照</div>
+          <canvas id="canvas" style="display:none;"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="small">签到地图（全班实时位置）</div>
+      <div class="map-wrap">
+        <div id="map" class="map-canvas"></div>
+      </div>
+      <div id="mapTip" class="small" style="margin-top:8px;">地图加载中...</div>
+      <div id="fallbackMaps" class="fallback-grid"></div>
+    </section>
+
+    <section class="card">
+      <div class="small" style="margin-bottom:8px;">全班签到实时看板（每 5 秒刷新）</div>
+      <table>
+        <thead>
+          <tr>
+            <th>姓名</th>
+            <th>状态</th>
+            <th>签到时间</th>
+            <th>位置</th>
+            <th>自拍</th>
+          </tr>
+        </thead>
+        <tbody id="boardBody"></tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <div class="blindbox-head">
+        <div class="small">全班盲盒墙（每 5 秒刷新）</div>
+        <button id="drawBtn" class="draw-btn">抽一个搞笑盲盒</button>
+      </div>
+      <div id="drawResult" class="draw-result">
+        <h3 id="drawTitle" class="draw-title"></h3>
+        <p id="drawDetail" style="margin:0;"></p>
+        <div id="drawOwnMeta" class="draw-meta"></div>
+      </div>
+      <div id="drawFeed" class="draw-feed"></div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const sessionId = location.pathname.split('/').pop();
+    const nameSelect = document.getElementById('nameSelect');
+    const checkBtn = document.getElementById('checkBtn');
+    const captureBtn = document.getElementById('captureBtn');
+    const msg = document.getElementById('msg');
+    const boardBody = document.getElementById('boardBody');
+    const mapTip = document.getElementById('mapTip');
+    const fallbackMaps = document.getElementById('fallbackMaps');
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const photoPreview = document.getElementById('photoPreview');
+    const photoStatus = document.getElementById('photoStatus');
+    const cameraTip = document.getElementById('cameraTip');
+    const drawBtn = document.getElementById('drawBtn');
+    const drawResult = document.getElementById('drawResult');
+    const drawTitle = document.getElementById('drawTitle');
+    const drawDetail = document.getElementById('drawDetail');
+    const drawOwnMeta = document.getElementById('drawOwnMeta');
+    const drawFeed = document.getElementById('drawFeed');
+
+    let stream = null;
+    let capturedPhotoDataUrl = '';
+    let map = null;
+    let markerLayer = null;
+
+    function show(text, ok) {
+      msg.textContent = text;
+      msg.className = `msg ${ok ? 'ok-msg' : 'err-msg'}`;
+      msg.style.display = 'block';
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function fmt(iso) {
+      if (!iso) return '-';
+      return new Date(iso).toLocaleString('zh-CN', { hour12: false });
+    }
+
+    function fmtLocation(loc) {
+      if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return '-';
+      const lat = Number(loc.lat).toFixed(6);
+      const lng = Number(loc.lng).toFixed(6);
+      const map = `https://www.google.com/maps?q=${lat},${lng}`;
+      return `<a class="link" target="_blank" rel="noreferrer" href="${map}">${lat}, ${lng}</a>`;
+    }
+
+    function photoCell(photoDataUrl) {
+      if (!photoDataUrl) return '<span class="small">-</span>';
+      const safe = escapeHtml(photoDataUrl);
+      return `<a href="${safe}" target="_blank" rel="noreferrer"><img class="thumb" src="${safe}" alt="签到自拍" /></a>`;
+    }
+
+    function renderDrawFeed(logs) {
+      if (!Array.isArray(logs) || !logs.length) {
+        drawFeed.innerHTML = `<div class="draw-item small">还没人抽盲盒，你来当第一个。</div>`;
+        return;
+      }
+      drawFeed.innerHTML = logs.slice(0, 80).map(log => `
+        <div class="draw-item">
+          <div><b>${escapeHtml(log.name)}</b> 抽到了：${escapeHtml(log.title)}</div>
+          <div>${escapeHtml(log.detail)}</div>
+          <div class="draw-meta">${escapeHtml(fmt(log.createdAt))}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderFallbackMaps(checked) {
+      if (!checked.length) {
+        fallbackMaps.innerHTML = '';
+        return;
+      }
+      fallbackMaps.innerHTML = checked.map(s => {
+        const lat = Number(s.checkinLocation.lat).toFixed(6);
+        const lng = Number(s.checkinLocation.lng).toFixed(6);
+        const src = `https://www.google.com/maps?q=${lat},${lng}&z=17&output=embed`;
+        return `
+          <div class="fallback-item">
+            <div class="small" style="margin-bottom:6px;"><b>${escapeHtml(s.name)}</b></div>
+            <iframe loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="${src}"></iframe>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function ensureMap() {
+      if (!window.L) {
+        mapTip.textContent = '地图脚本加载失败（CDN 访问受限），请刷新或切换网络后重试。';
+        return;
+      }
+      if (!window.L || map) return;
+      map = L.map('map');
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap'
+      }).addTo(map);
+      markerLayer = L.layerGroup().addTo(map);
+      map.setView([35.8617, 104.1954], 4);
+    }
+
+    function updateMap(data) {
+      const checked = data.students.filter(s => s.checkedIn && s.checkinLocation && Number.isFinite(s.checkinLocation.lat) && Number.isFinite(s.checkinLocation.lng));
+      renderFallbackMaps(checked);
+
+      ensureMap();
+      if (!map || !markerLayer) return;
+
+      markerLayer.clearLayers();
+
+      if (checked.length === 0) {
+        mapTip.textContent = '暂无已签到定位点';
+        return;
+      }
+
+      const bounds = [];
+      checked.forEach(s => {
+        const lat = Number(s.checkinLocation.lat);
+        const lng = Number(s.checkinLocation.lng);
+        bounds.push([lat, lng]);
+        const popup = `
+          <div style="min-width:170px;">
+            <div><b>${escapeHtml(s.name)}</b></div>
+            <div style="font-size:12px;color:#475569;margin-top:4px;">${escapeHtml(fmt(s.checkedInAt))}</div>
+            ${s.checkinPhoto ? `<img src="${escapeHtml(s.checkinPhoto)}" style="width:100%;margin-top:6px;border-radius:8px;border:1px solid #e2e8f0;" alt="自拍" />` : ''}
+          </div>
+        `;
+        L.marker([lat, lng]).addTo(markerLayer).bindPopup(popup);
+      });
+
+      mapTip.textContent = `已显示 ${checked.length} 个签到位置`;
+      if (bounds.length === 1) {
+        map.setView(bounds[0], 17);
+      } else {
+        map.fitBounds(bounds, { padding: [24, 24] });
+      }
+    }
+
+    async function startCamera() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('当前浏览器不支持摄像头');
+      }
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false
+      });
+      video.srcObject = stream;
+      cameraTip.textContent = '摄像头已开启，请点击“拍照”';
+    }
+
+    function capturePhoto() {
+      if (!video.videoWidth || !video.videoHeight) {
+        throw new Error('摄像头尚未就绪');
+      }
+      const targetW = 480;
+      const scale = targetW / video.videoWidth;
+      const targetH = Math.round(video.videoHeight * scale);
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext('2d');
+      // Mirror image to match selfie preview
+      ctx.translate(targetW, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, 0, 0, targetW, targetH);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+      capturedPhotoDataUrl = dataUrl;
+      photoPreview.src = dataUrl;
+      photoPreview.style.display = 'block';
+      photoStatus.textContent = '已拍照';
+      photoStatus.className = 'small';
+    }
+
+    async function getLocation() {
+      if (!navigator.geolocation) {
+        throw new Error('当前浏览器不支持定位');
+      }
+      return new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          pos => {
+            resolve({
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy: pos.coords.accuracy
+            });
+          },
+          () => reject(new Error('未获取到定位，请允许定位权限后重试')),
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        );
+      });
+    }
+
+    async function fetchSession() {
+      const res = await fetch(`/api/sessions/${sessionId}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '读取失败');
+      return data;
+    }
+
+    function renderBoard(data) {
+      const oldSelected = nameSelect.value;
+      const options = data.students.map(s => {
+        const suffix = s.checkedIn ? '（已签到）' : '';
+        return `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}${suffix}</option>`;
+      }).join('');
+      nameSelect.innerHTML = options;
+      if (oldSelected && data.students.some(s => s.name === oldSelected)) {
+        nameSelect.value = oldSelected;
+      }
+
+      boardBody.innerHTML = data.students.map(s => `
+        <tr>
+          <td>${escapeHtml(s.name)}</td>
+          <td class="${s.checkedIn ? 'ok' : 'pending'}">${s.checkedIn ? '已签到' : '未签到'}</td>
+          <td>${fmt(s.checkedInAt)}</td>
+          <td>${fmtLocation(s.checkinLocation)}</td>
+          <td>${photoCell(s.checkinPhoto)}</td>
+        </tr>
+      `).join('');
+
+      renderDrawFeed(data.drawLogs || []);
+      updateMap(data);
+
+      const selected = data.students.find(s => s.name === nameSelect.value);
+      checkBtn.disabled = !!(selected && selected.checkedIn);
+    }
+
+    async function refreshBoard() {
+      const data = await fetchSession();
+      renderBoard(data);
+      return data;
+    }
+
+    captureBtn.addEventListener('click', () => {
+      try {
+        capturePhoto();
+      } catch (err) {
+        show(err.message || '拍照失败', false);
+      }
+    });
+
+    nameSelect.addEventListener('change', async () => {
+      try {
+        await refreshBoard();
+      } catch {
+        // no-op
+      }
+    });
+
+    checkBtn.addEventListener('click', async () => {
+      const name = nameSelect.value;
+      if (!name) {
+        show('请先选择名字', false);
+        return;
+      }
+      if (!capturedPhotoDataUrl) {
+        show('请先拍照再签到（不支持相册）', false);
+        return;
+      }
+
+      checkBtn.disabled = true;
+      checkBtn.textContent = '定位并提交中...';
+      try {
+        const location = await getLocation();
+        const res = await fetch(`/api/sessions/${sessionId}/checkin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            location,
+            photoDataUrl: capturedPhotoDataUrl
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '签到失败');
+        show('签到成功，已记录位置和自拍。', true);
+        capturedPhotoDataUrl = '';
+        photoPreview.style.display = 'none';
+        photoPreview.src = '';
+        photoStatus.textContent = '未拍照';
+        photoStatus.className = 'small missing';
+        await refreshBoard();
+      } catch (err) {
+        show(err.message || '签到失败', false);
+      } finally {
+        checkBtn.textContent = '签到（定位+拍照）';
+      }
+    });
+
+    drawBtn.addEventListener('click', async () => {
+      const name = nameSelect.value;
+      if (!name) {
+        show('请先选择名字', false);
+        return;
+      }
+
+      drawBtn.disabled = true;
+      drawBtn.textContent = '抽取中...';
+      try {
+        const res = await fetch(`/api/sessions/${sessionId}/draw`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '抽取失败');
+
+        drawResult.style.display = 'block';
+        drawTitle.textContent = data.draw.title;
+        drawDetail.textContent = data.draw.detail;
+        drawOwnMeta.textContent = `你的累计抽取次数：${data.drawCount}`;
+        await refreshBoard();
+      } catch (err) {
+        show(err.message || '抽取失败', false);
+      } finally {
+        drawBtn.disabled = false;
+        drawBtn.textContent = '抽一个搞笑盲盒';
+      }
+    });
+
+    async function init() {
+      try {
+        await startCamera();
+      } catch (err) {
+        cameraTip.textContent = err.message || '摄像头启动失败';
+        show('摄像头不可用，无法完成拍照签到', false);
+      }
+      await refreshBoard();
+      setInterval(() => {
+        refreshBoard().catch(() => {});
+      }, 5000);
+    }
+
+    init().catch(err => show(err.message || '加载失败', false));
+
+    window.addEventListener('beforeunload', () => {
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+      }
+    });
+  </script>
+</body>
+</html>
