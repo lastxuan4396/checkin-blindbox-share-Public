@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>签到 + 习惯盲盒 v3.0（老师创建）</title>
+  <title>签到 + 习惯盲盒 v4.0（老师创建）</title>
   <style>
     :root {
       --bg: #f8fafc;
@@ -72,8 +72,8 @@
 </head>
 <body>
   <main class="card">
-    <h1>创建签到 + 盲盒 v3.0</h1>
-    <p>每行一个名字，创建后发学生链接。规则：先签到，再无限抽盲盒（全员可见）。</p>
+    <h1>创建签到 + 盲盒 v4.0</h1>
+    <p>每行一个名字，创建后发学生链接。支持防冒名口令、完成挑战、排行榜、后台开关和自定义梗池。</p>
     <textarea id="names" placeholder="张三\n李四\n王五"></textarea>
     <button id="createBtn">创建签到并生成链接</button>
 
@@ -84,7 +84,7 @@
       <a id="checkinLink" class="link" target="_blank" rel="noreferrer"></a>
       <button id="copyBtn" style="margin-top:10px;background:#334155;">复制学生签到链接</button>
     </div>
-    <div class="tip">签到自动记录时间/位置/自拍；盲盒抽取次数不限并实时同步。</div>
+    <div class="tip">默认先签到再抽卡；后台可切换规则、匿名模式和实时墙展示。</div>
   </main>
 
   <script>

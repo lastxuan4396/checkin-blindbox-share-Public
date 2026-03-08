@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>学生签到 + 习惯盲盒 v3.0</title>
+  <title>学生签到 + 习惯盲盒 v4.0</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     :root {
@@ -17,6 +17,7 @@
       --pending: #d97706;
       --danger: #dc2626;
       --box: #7c3aed;
+      --box2: #4338ca;
     }
     * { box-sizing: border-box; }
     body {
@@ -26,7 +27,7 @@
       color: var(--text);
       padding: 16px;
     }
-    .wrap { max-width: 980px; margin: 0 auto; }
+    .wrap { max-width: 1060px; margin: 0 auto; }
     .card {
       background: var(--card);
       border: 1px solid var(--line);
@@ -36,6 +37,7 @@
       margin-bottom: 12px;
     }
     h1 { margin: 0 0 8px; font-size: 24px; }
+    h2 { margin: 0 0 8px; font-size: 20px; }
     p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
     .controls {
       display: grid;
@@ -44,15 +46,17 @@
       margin-top: 10px;
     }
     .left, .right { min-width: 0; }
-    @media (max-width: 860px) {
+    @media (max-width: 900px) {
       .controls { grid-template-columns: 1fr; }
+      .double-grid { grid-template-columns: 1fr; }
     }
-    select {
+    select, textarea, input[type="text"] {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 10px;
       padding: 10px;
       font-size: 15px;
+      font-family: inherit;
     }
     button {
       width: 100%;
@@ -60,13 +64,19 @@
       border: 0;
       border-radius: 10px;
       padding: 10px 12px;
-      font-size: 15px;
+      font-size: 14px;
       cursor: pointer;
       color: #fff;
       background: var(--brand);
     }
-    .btn-secondary {
-      background: #334155;
+    .btn-secondary { background: #334155; }
+    .btn-box { background: var(--box); }
+    .btn-box2 { background: var(--box2); }
+    .btn-ok { background: var(--ok); }
+    .btn-outline {
+      background: #fff;
+      color: #334155;
+      border: 1px solid var(--line);
     }
     .camera-wrap {
       border: 1px solid var(--line);
@@ -158,6 +168,11 @@
       border: 0;
       border-radius: 8px;
     }
+    .double-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 12px;
+    }
     .blindbox-head {
       display: flex;
       align-items: center;
@@ -166,34 +181,29 @@
       margin-bottom: 8px;
       flex-wrap: wrap;
     }
-    .draw-btn {
-      border: 0;
-      border-radius: 10px;
-      padding: 10px 14px;
-      font-size: 14px;
-      cursor: pointer;
-      color: #fff;
-      background: var(--box);
-      width: auto;
-      margin: 0;
-    }
     .draw-result {
-      border: 1px solid var(--line);
+      border: 1px solid #ddd6fe;
       border-radius: 10px;
-      padding: 10px;
+      padding: 12px;
       background: #f8f7ff;
       color: #1e1b4b;
       margin-bottom: 10px;
       display: none;
     }
     .draw-title {
-      margin: 0 0 4px;
+      margin: 0 0 6px;
       font-weight: 700;
-      font-size: 16px;
+      font-size: 18px;
       color: #5b21b6;
     }
+    .draw-actions {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      margin-top: 10px;
+    }
     .draw-feed {
-      max-height: 280px;
+      max-height: 300px;
       overflow: auto;
       border: 1px solid var(--line);
       border-radius: 10px;
@@ -204,32 +214,65 @@
       border-bottom: 1px dashed var(--line);
       font-size: 14px;
     }
-    .draw-item:last-child {
-      border-bottom: 0;
-    }
+    .draw-item:last-child { border-bottom: 0; }
     .draw-meta {
       color: var(--muted);
       font-size: 12px;
       margin-top: 4px;
+    }
+    .badge {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      border: 1px solid var(--line);
+      color: #1f2937;
+      background: #fff;
+    }
+    .wall-off {
+      border: 1px dashed var(--line);
+      border-radius: 10px;
+      padding: 12px;
+      color: var(--muted);
+      font-size: 14px;
+      background: #fafafa;
+    }
+    .token-box {
+      margin-top: 10px;
+      font-size: 13px;
+      color: var(--muted);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px;
+      background: #f8fafc;
+    }
+    .rank-table th, .rank-table td { font-size: 13px; }
+    .share-preview {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      margin-top: 8px;
+      display: none;
     }
   </style>
 </head>
 <body>
   <main class="wrap">
     <section class="card">
-      <h1>学生签到 + 习惯盲盒 v3.0</h1>
-      <p>先签到（定位+拍照）再抽盲盒。盲盒抽取次数不限，全员可见实时抽卡记录。</p>
+      <h1>学生签到 + 习惯盲盒 v4.0</h1>
+      <p>默认规则：先签到再抽卡。抽卡身份采用口令绑定，防止他人冒名。</p>
 
       <div class="controls">
         <div class="left">
           <label class="small" for="nameSelect">选择姓名</label>
           <select id="nameSelect"></select>
           <button id="checkBtn">签到（定位+拍照）</button>
+          <div class="token-box" id="tokenBox">抽卡口令状态：未绑定</div>
           <div id="msg" class="msg"></div>
         </div>
 
         <div class="right">
-          <div class="camera-wrap" id="cameraWrap">
+          <div class="camera-wrap">
             <video id="video" autoplay playsinline muted></video>
             <div class="camera-tip" id="cameraTip">请允许摄像头权限后拍照</div>
           </div>
@@ -260,23 +303,57 @@
             <th>签到时间</th>
             <th>位置</th>
             <th>自拍</th>
+            <th>抽取</th>
+            <th>完成</th>
           </tr>
         </thead>
         <tbody id="boardBody"></tbody>
       </table>
     </section>
 
-    <section class="card">
-      <div class="blindbox-head">
-        <div class="small">全班盲盒墙（每 5 秒刷新）</div>
-        <button id="drawBtn" class="draw-btn">抽一个搞笑盲盒</button>
-      </div>
-      <div id="drawResult" class="draw-result">
-        <h3 id="drawTitle" class="draw-title"></h3>
-        <p id="drawDetail" style="margin:0;"></p>
-        <div id="drawOwnMeta" class="draw-meta"></div>
-      </div>
-      <div id="drawFeed" class="draw-feed"></div>
+    <section class="double-grid">
+      <article class="card">
+        <div class="blindbox-head">
+          <h2>盲盒区</h2>
+          <button id="drawBtn" class="btn-box" style="width:auto;margin:0;">抽一个搞笑盲盒</button>
+        </div>
+        <div class="small" id="ruleTip" style="margin-bottom:8px;"></div>
+
+        <div id="drawResult" class="draw-result">
+          <h3 id="drawTitle" class="draw-title"></h3>
+          <p id="drawDetail" style="margin:0;"></p>
+          <div id="drawOwnMeta" class="draw-meta"></div>
+          <div id="drawDoneTag" class="draw-meta" style="display:none;"></div>
+          <div class="draw-actions">
+            <button id="completeBtn" class="btn-ok" style="margin:0;">我完成了这个挑战</button>
+            <button id="shareBtn" class="btn-box2" style="margin:0;">生成分享图</button>
+          </div>
+          <img id="sharePreview" class="share-preview" alt="分享图预览" />
+        </div>
+
+        <div id="wallWrap">
+          <div class="small" style="margin-bottom:8px;">全班盲盒实时墙</div>
+          <div id="drawFeed" class="draw-feed"></div>
+        </div>
+        <div id="wallOff" class="wall-off" style="display:none;">当前场次已关闭实时盲盒墙。</div>
+      </article>
+
+      <article class="card">
+        <h2 style="margin-bottom:8px;">挑战排行榜</h2>
+        <div class="small" id="rankTip" style="margin-bottom:8px;"></div>
+        <table class="rank-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>同学</th>
+              <th>完成</th>
+              <th>抽取</th>
+              <th>完成率</th>
+            </tr>
+          </thead>
+          <tbody id="rankBody"></tbody>
+        </table>
+      </article>
     </section>
   </main>
 
@@ -300,12 +377,38 @@
     const drawTitle = document.getElementById('drawTitle');
     const drawDetail = document.getElementById('drawDetail');
     const drawOwnMeta = document.getElementById('drawOwnMeta');
+    const drawDoneTag = document.getElementById('drawDoneTag');
     const drawFeed = document.getElementById('drawFeed');
+    const completeBtn = document.getElementById('completeBtn');
+    const shareBtn = document.getElementById('shareBtn');
+    const sharePreview = document.getElementById('sharePreview');
+    const wallWrap = document.getElementById('wallWrap');
+    const wallOff = document.getElementById('wallOff');
+    const ruleTip = document.getElementById('ruleTip');
+    const rankBody = document.getElementById('rankBody');
+    const rankTip = document.getElementById('rankTip');
+    const tokenBox = document.getElementById('tokenBox');
 
     let stream = null;
     let capturedPhotoDataUrl = '';
     let map = null;
     let markerLayer = null;
+    let latestSession = null;
+    let currentDraw = null;
+
+    function tokenStorageKey(name) {
+      return `blindbox_token_${sessionId}_${name}`;
+    }
+
+    function getLocalToken(name) {
+      if (!name) return '';
+      return localStorage.getItem(tokenStorageKey(name)) || '';
+    }
+
+    function setLocalToken(name, token) {
+      if (!name || !token) return;
+      localStorage.setItem(tokenStorageKey(name), token);
+    }
 
     function show(text, ok) {
       msg.textContent = text;
@@ -341,17 +444,46 @@
       return `<a href="${safe}" target="_blank" rel="noreferrer"><img class="thumb" src="${safe}" alt="签到自拍" /></a>`;
     }
 
+    function refreshTokenStatus() {
+      const name = nameSelect.value;
+      const token = getLocalToken(name);
+      if (token) {
+        tokenBox.textContent = `抽卡口令状态：已绑定（${token.slice(0, 4)}****）`;
+      } else {
+        tokenBox.textContent = '抽卡口令状态：未绑定';
+      }
+    }
+
     function renderDrawFeed(logs) {
       if (!Array.isArray(logs) || !logs.length) {
-        drawFeed.innerHTML = `<div class="draw-item small">还没人抽盲盒，你来当第一个。</div>`;
+        drawFeed.innerHTML = '<div class="draw-item small">还没人抽盲盒，你来当第一个。</div>';
         return;
       }
-      drawFeed.innerHTML = logs.slice(0, 80).map(log => `
+      drawFeed.innerHTML = logs.slice(0, 100).map(log => `
         <div class="draw-item">
-          <div><b>${escapeHtml(log.name)}</b> 抽到了：${escapeHtml(log.title)}</div>
+          <div>
+            <b>${escapeHtml(log.name)}</b> 抽到了：${escapeHtml(log.title)}
+            ${log.completed ? '<span class="badge">已完成</span>' : '<span class="badge">待完成</span>'}
+          </div>
           <div>${escapeHtml(log.detail)}</div>
-          <div class="draw-meta">${escapeHtml(fmt(log.createdAt))}</div>
+          <div class="draw-meta">抽取：${escapeHtml(fmt(log.createdAt))}${log.completedAt ? ` · 完成：${escapeHtml(fmt(log.completedAt))}` : ''}</div>
         </div>
+      `).join('');
+    }
+
+    function renderLeaderboard(rows) {
+      if (!Array.isArray(rows) || !rows.length) {
+        rankBody.innerHTML = '<tr><td colspan="5" class="small">暂无排行榜数据</td></tr>';
+        return;
+      }
+      rankBody.innerHTML = rows.map((row, idx) => `
+        <tr>
+          <td>${idx + 1}</td>
+          <td>${escapeHtml(row.name)}</td>
+          <td>${row.completeCount}</td>
+          <td>${row.drawCount}</td>
+          <td>${row.completionRate}%</td>
+        </tr>
       `).join('');
     }
 
@@ -396,7 +528,7 @@
 
       markerLayer.clearLayers();
 
-      if (checked.length === 0) {
+      if (!checked.length) {
         mapTip.textContent = '暂无已签到定位点';
         return;
       }
@@ -446,7 +578,6 @@
       canvas.width = targetW;
       canvas.height = targetH;
       const ctx = canvas.getContext('2d');
-      // Mirror image to match selfie preview
       ctx.translate(targetW, 0);
       ctx.scale(-1, 1);
       ctx.drawImage(video, 0, 0, targetW, targetH);
@@ -484,13 +615,33 @@
       return data;
     }
 
+    async function claimToken(name) {
+      const res = await fetch(`/api/sessions/${sessionId}/claim-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '领取口令失败');
+      setLocalToken(name, data.drawToken);
+      refreshTokenStatus();
+      return data.drawToken;
+    }
+
+    async function ensureToken(name) {
+      const local = getLocalToken(name);
+      if (local) return local;
+      return claimToken(name);
+    }
+
     function renderBoard(data) {
+      latestSession = data;
       const oldSelected = nameSelect.value;
-      const options = data.students.map(s => {
+      nameSelect.innerHTML = data.students.map(s => {
         const suffix = s.checkedIn ? '（已签到）' : '';
         return `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}${suffix}</option>`;
       }).join('');
-      nameSelect.innerHTML = options;
+
       if (oldSelected && data.students.some(s => s.name === oldSelected)) {
         nameSelect.value = oldSelected;
       }
@@ -502,20 +653,163 @@
           <td>${fmt(s.checkedInAt)}</td>
           <td>${fmtLocation(s.checkinLocation)}</td>
           <td>${photoCell(s.checkinPhoto)}</td>
+          <td>${s.drawCount || 0}</td>
+          <td>${s.completeCount || 0}</td>
         </tr>
       `).join('');
 
-      renderDrawFeed(data.drawLogs || []);
       updateMap(data);
+      renderLeaderboard(data.leaderboard || []);
+
+      if (data.settings.showRealtimeWall) {
+        wallWrap.style.display = 'block';
+        wallOff.style.display = 'none';
+        renderDrawFeed(data.drawLogs || []);
+      } else {
+        wallWrap.style.display = 'none';
+        wallOff.style.display = 'block';
+      }
+
+      ruleTip.textContent = data.settings.requireCheckinBeforeDraw
+        ? '当前规则：必须签到后才能抽卡。'
+        : '当前规则：不强制先签到，只要绑定口令即可抽卡。';
+      rankTip.textContent = data.settings.anonymousWall
+        ? '当前为匿名展示模式（排行榜和实时墙已匿名）'
+        : '当前为实名展示模式';
 
       const selected = data.students.find(s => s.name === nameSelect.value);
       checkBtn.disabled = !!(selected && selected.checkedIn);
+      refreshTokenStatus();
     }
 
     async function refreshBoard() {
       const data = await fetchSession();
       renderBoard(data);
       return data;
+    }
+
+    function setCurrentDraw(draw, counts = null) {
+      currentDraw = draw;
+      if (!draw) {
+        drawResult.style.display = 'none';
+        sharePreview.style.display = 'none';
+        return;
+      }
+      drawResult.style.display = 'block';
+      drawTitle.textContent = draw.title;
+      drawDetail.textContent = draw.detail;
+      if (counts) {
+        drawOwnMeta.textContent = `你的累计抽取：${counts.drawCount} · 累计完成：${counts.completeCount}`;
+      }
+      if (draw.completed) {
+        drawDoneTag.style.display = 'block';
+        drawDoneTag.textContent = `该挑战已完成：${fmt(draw.completedAt)}`;
+        completeBtn.disabled = true;
+      } else {
+        drawDoneTag.style.display = 'none';
+        completeBtn.disabled = false;
+      }
+    }
+
+    function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+      const chars = String(text || '').split('');
+      let line = '';
+      const lines = [];
+      chars.forEach(ch => {
+        const test = line + ch;
+        if (ctx.measureText(test).width > maxWidth) {
+          if (line) lines.push(line);
+          line = ch;
+        } else {
+          line = test;
+        }
+      });
+      if (line) lines.push(line);
+      lines.forEach((lineText, idx) => {
+        ctx.fillText(lineText, x, y + idx * lineHeight);
+      });
+      return lines.length;
+    }
+
+    async function generateShareImage() {
+      if (!currentDraw) return;
+      const name = nameSelect.value || '同学';
+      const canvasCard = document.createElement('canvas');
+      canvasCard.width = 1080;
+      canvasCard.height = 1350;
+      const ctx = canvasCard.getContext('2d');
+
+      const g = ctx.createLinearGradient(0, 0, 1080, 1350);
+      g.addColorStop(0, '#312e81');
+      g.addColorStop(0.45, '#5b21b6');
+      g.addColorStop(1, '#7c3aed');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, canvasCard.width, canvasCard.height);
+
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      ctx.beginPath();
+      ctx.arc(890, 220, 180, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(180, 1180, 220, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 64px PingFang SC';
+      ctx.fillText('今日盲盒挑战', 80, 130);
+
+      ctx.font = '38px PingFang SC';
+      ctx.fillStyle = '#ede9fe';
+      ctx.fillText(`来自：${name}`, 80, 195);
+
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.fillRect(70, 250, 940, 760);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 72px PingFang SC';
+      let y = 370;
+      y += wrapText(ctx, currentDraw.title, 110, y, 860, 92) * 92;
+
+      ctx.font = '42px PingFang SC';
+      ctx.fillStyle = '#f5f3ff';
+      y += 35;
+      wrapText(ctx, currentDraw.detail, 110, y, 860, 64);
+
+      ctx.font = '36px PingFang SC';
+      ctx.fillStyle = '#ede9fe';
+      ctx.fillText(`抽取时间：${fmt(currentDraw.createdAt || new Date().toISOString())}`, 110, 1085);
+
+      ctx.font = '30px PingFang SC';
+      ctx.fillText(`场次：${sessionId}`, 110, 1140);
+      ctx.fillText('checkin + blindbox', 110, 1200);
+
+      const dataUrl = canvasCard.toDataURL('image/png');
+      sharePreview.src = dataUrl;
+      sharePreview.style.display = 'block';
+
+      const blob = await new Promise(resolve => canvasCard.toBlob(resolve, 'image/png'));
+      const file = new File([blob], `盲盒挑战_${Date.now()}.png`, { type: 'image/png' });
+
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            title: '我的盲盒挑战',
+            text: `${name} 抽到了：${currentDraw.title}`,
+            files: [file]
+          });
+          return;
+        } catch {
+          // user canceled; fallback to download
+        }
+      }
+
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `盲盒挑战_${Date.now()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      show('已生成分享图（已自动下载）', true);
     }
 
     captureBtn.addEventListener('click', () => {
@@ -526,12 +820,8 @@
       }
     });
 
-    nameSelect.addEventListener('change', async () => {
-      try {
-        await refreshBoard();
-      } catch {
-        // no-op
-      }
+    nameSelect.addEventListener('change', () => {
+      refreshTokenStatus();
     });
 
     checkBtn.addEventListener('click', async () => {
@@ -560,7 +850,12 @@
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '签到失败');
-        show('签到成功，已记录位置和自拍。', true);
+
+        if (data.drawToken) {
+          setLocalToken(name, data.drawToken);
+        }
+
+        show('签到成功，已记录位置+自拍，并完成抽卡口令绑定。', true);
         capturedPhotoDataUrl = '';
         photoPreview.style.display = 'none';
         photoPreview.src = '';
@@ -584,24 +879,84 @@
       drawBtn.disabled = true;
       drawBtn.textContent = '抽取中...';
       try {
+        const token = await ensureToken(name);
         const res = await fetch(`/api/sessions/${sessionId}/draw`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name })
+          body: JSON.stringify({ name, token })
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '抽取失败');
 
-        drawResult.style.display = 'block';
-        drawTitle.textContent = data.draw.title;
-        drawDetail.textContent = data.draw.detail;
-        drawOwnMeta.textContent = `你的累计抽取次数：${data.drawCount}`;
+        setCurrentDraw(data.drawRaw, {
+          drawCount: data.drawCount,
+          completeCount: data.completeCount
+        });
         await refreshBoard();
       } catch (err) {
         show(err.message || '抽取失败', false);
       } finally {
         drawBtn.disabled = false;
         drawBtn.textContent = '抽一个搞笑盲盒';
+      }
+    });
+
+    completeBtn.addEventListener('click', async () => {
+      const name = nameSelect.value;
+      if (!name) {
+        show('请先选择名字', false);
+        return;
+      }
+      if (!currentDraw || !currentDraw.id) {
+        show('请先抽取一个挑战', false);
+        return;
+      }
+
+      completeBtn.disabled = true;
+      completeBtn.textContent = '提交中...';
+      try {
+        const token = await ensureToken(name);
+        const res = await fetch(`/api/sessions/${sessionId}/complete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            token,
+            drawId: currentDraw.id
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '提交完成失败');
+
+        currentDraw.completed = true;
+        currentDraw.completedAt = data.completedAt;
+        setCurrentDraw(currentDraw, {
+          drawCount: data.drawCount,
+          completeCount: data.completeCount
+        });
+        await refreshBoard();
+        show('挑战完成已记录，排行榜已刷新。', true);
+      } catch (err) {
+        show(err.message || '提交完成失败', false);
+      } finally {
+        completeBtn.textContent = '我完成了这个挑战';
+      }
+    });
+
+    shareBtn.addEventListener('click', async () => {
+      if (!currentDraw) {
+        show('请先抽取一个挑战再分享', false);
+        return;
+      }
+      shareBtn.disabled = true;
+      shareBtn.textContent = '生成中...';
+      try {
+        await generateShareImage();
+      } catch (err) {
+        show(err.message || '生成分享图失败', false);
+      } finally {
+        shareBtn.disabled = false;
+        shareBtn.textContent = '生成分享图';
       }
     });
 

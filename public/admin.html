@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>签到统计 v2.0</title>
+  <title>签到 + 盲盒后台 v4.0</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     :root {
@@ -14,6 +14,8 @@
       --muted: #64748b;
       --ok: #16a34a;
       --pending: #d97706;
+      --brand: #0f766e;
+      --danger: #dc2626;
     }
     * { box-sizing: border-box; }
     body {
@@ -23,7 +25,7 @@
       color: var(--text);
       padding: 16px;
     }
-    .wrap { max-width: 1060px; margin: 0 auto; }
+    .wrap { max-width: 1120px; margin: 0 auto; }
     .card {
       background: var(--card);
       border: 1px solid var(--line);
@@ -44,6 +46,18 @@
       color: var(--muted);
     }
     .stat b { display: block; margin-top: 4px; color: var(--text); font-size: 24px; }
+    .small { font-size: 13px; color: var(--muted); }
+    .ok { color: var(--ok); font-weight: 600; }
+    .pending { color: var(--pending); font-weight: 600; }
+    .danger { color: var(--danger); font-weight: 600; }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 900px) {
+      .grid-2 { grid-template-columns: 1fr; }
+    }
     table { width: 100%; border-collapse: collapse; }
     th, td {
       border-bottom: 1px solid var(--line);
@@ -53,15 +67,28 @@
       vertical-align: top;
     }
     th { color: var(--muted); font-weight: 600; }
-    .ok { color: var(--ok); font-weight: 600; }
-    .pending { color: var(--pending); font-weight: 600; }
-    .small { font-size: 13px; color: var(--muted); }
     .link { color: #0369a1; text-decoration: none; }
     .thumb {
       width: 56px;
       height: 56px;
       object-fit: cover;
       border-radius: 8px;
+      border: 1px solid var(--line);
+    }
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: var(--brand);
+      color: #fff;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .btn-muted { background: #334155; }
+    .btn-danger { background: #b91c1c; }
+    .btn-outline {
+      background: #fff;
+      color: #334155;
       border: 1px solid var(--line);
     }
     .map-wrap {
@@ -93,19 +120,111 @@
       border: 0;
       border-radius: 8px;
     }
+    .switches {
+      display: grid;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .switch-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fcfcfc;
+    }
+    .pool-add {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: #fafafa;
+    }
+    .pool-add input, .pool-add textarea,
+    .pool-item input, .pool-item textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 13px;
+      font-family: inherit;
+      margin-top: 6px;
+    }
+    .pool-list {
+      max-height: 430px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      margin-top: 10px;
+      background: #fff;
+    }
+    .pool-item {
+      padding: 10px;
+      border-bottom: 1px dashed var(--line);
+    }
+    .pool-item:last-child { border-bottom: 0; }
+    .pool-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+      flex-wrap: wrap;
+    }
+    .feed {
+      max-height: 260px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+    }
+    .feed-item {
+      padding: 10px;
+      border-bottom: 1px dashed var(--line);
+      font-size: 14px;
+    }
+    .feed-item:last-child { border-bottom: 0; }
   </style>
 </head>
 <body>
   <main class="wrap">
     <section class="card">
-      <h2 style="margin:0 0 8px;">签到统计 v2.0</h2>
-      <div class="small">页面每 2 秒自动刷新</div>
-      <button id="exportBtn" style="margin-top:10px;border:0;border-radius:8px;padding:8px 10px;background:#0f766e;color:#fff;cursor:pointer;">导出 CSV</button>
+      <h2 style="margin:0 0 8px;">签到 + 盲盒后台 v4.0</h2>
+      <div class="small">每 5 秒自动刷新（梗池编辑时不会覆盖你正在输入的内容）</div>
+      <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button id="exportBtn">导出 CSV</button>
+        <button id="manualRefreshBtn" class="btn-muted">手动刷新</button>
+      </div>
       <div class="stats" style="margin-top:10px;">
         <div class="stat">应到<b id="total">0</b></div>
         <div class="stat">已到<b id="checked">0</b></div>
         <div class="stat">未到<b id="absent">0</b></div>
+        <div class="stat">总抽取<b id="totalDraw">0</b></div>
+        <div class="stat">总完成<b id="totalComplete">0</b></div>
+        <div class="stat">总完成率<b id="overallRate">0%</b></div>
       </div>
+    </section>
+
+    <section class="grid-2">
+      <article class="card">
+        <h3 style="margin:0 0 8px;">场次开关</h3>
+        <div class="switches">
+          <label class="switch-item"><input type="checkbox" id="sRequireCheckin" /> 只允许先签到再抽卡</label>
+          <label class="switch-item"><input type="checkbox" id="sShowWall" /> 显示全员实时盲盒墙</label>
+          <label class="switch-item"><input type="checkbox" id="sAnonymous" /> 实时墙和排行榜匿名显示</label>
+        </div>
+        <button id="saveSettingsBtn" style="margin-top:10px;">保存开关</button>
+        <div class="small" id="settingsMsg" style="margin-top:8px;"></div>
+      </article>
+
+      <article class="card">
+        <h3 style="margin:0 0 8px;">完成榜（按完成数）</h3>
+        <table>
+          <thead>
+            <tr><th>#</th><th>同学</th><th>完成</th><th>抽取</th><th>完成率</th></tr>
+          </thead>
+          <tbody id="rankBody"></tbody>
+        </table>
+      </article>
     </section>
 
     <section class="card">
@@ -118,12 +237,32 @@
     </section>
 
     <section class="card">
-      <table>
-        <thead>
-          <tr><th>姓名</th><th>状态</th><th>签到时间</th><th>签到位置</th><th>自拍</th></tr>
-        </thead>
-        <tbody id="tbody"></tbody>
-      </table>
+      <h3 style="margin:0 0 8px;">自定义梗池</h3>
+      <div class="pool-add">
+        <div class="small">新增梗</div>
+        <input id="newTitle" type="text" maxlength="40" placeholder="标题（最多 40 字）" />
+        <textarea id="newDetail" rows="3" maxlength="180" placeholder="内容（最多 180 字）"></textarea>
+        <label class="small" style="display:block;margin-top:8px;"><input id="newEnabled" type="checkbox" checked /> 立即启用</label>
+        <button id="addPoolBtn" style="margin-top:8px;">新增到梗池</button>
+      </div>
+      <div id="poolList" class="pool-list"></div>
+    </section>
+
+    <section class="grid-2">
+      <article class="card">
+        <h3 style="margin:0 0 8px;">全班签到明细</h3>
+        <table>
+          <thead>
+            <tr><th>姓名</th><th>状态</th><th>签到时间</th><th>位置</th><th>自拍</th><th>抽取</th><th>完成</th></tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </article>
+
+      <article class="card">
+        <h3 style="margin:0 0 8px;">盲盒日志（最新 120 条）</h3>
+        <div id="drawFeed" class="feed"></div>
+      </article>
     </section>
   </main>
 
@@ -133,10 +272,27 @@
     const totalEl = document.getElementById('total');
     const checkedEl = document.getElementById('checked');
     const absentEl = document.getElementById('absent');
+    const totalDrawEl = document.getElementById('totalDraw');
+    const totalCompleteEl = document.getElementById('totalComplete');
+    const overallRateEl = document.getElementById('overallRate');
     const tbody = document.getElementById('tbody');
     const exportBtn = document.getElementById('exportBtn');
+    const manualRefreshBtn = document.getElementById('manualRefreshBtn');
     const mapTip = document.getElementById('mapTip');
     const fallbackMaps = document.getElementById('fallbackMaps');
+    const rankBody = document.getElementById('rankBody');
+    const drawFeed = document.getElementById('drawFeed');
+    const poolList = document.getElementById('poolList');
+    const newTitle = document.getElementById('newTitle');
+    const newDetail = document.getElementById('newDetail');
+    const newEnabled = document.getElementById('newEnabled');
+    const addPoolBtn = document.getElementById('addPoolBtn');
+    const sRequireCheckin = document.getElementById('sRequireCheckin');
+    const sShowWall = document.getElementById('sShowWall');
+    const sAnonymous = document.getElementById('sAnonymous');
+    const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+    const settingsMsg = document.getElementById('settingsMsg');
+
     let latest = null;
     let map = null;
     let markerLayer = null;
@@ -158,6 +314,33 @@
       if (!photoDataUrl) return '<span class="small">-</span>';
       const safe = escapeHtml(photoDataUrl);
       return `<a href="${safe}" target="_blank" rel="noreferrer"><img class="thumb" src="${safe}" alt="签到自拍" /></a>`;
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    async function fetchData() {
+      const res = await fetch(`/api/sessions/${sessionId}/admin`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '读取失败');
+      return data;
+    }
+
+    async function postJson(url, payload) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload || {})
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '请求失败');
+      return data;
     }
 
     function renderFallbackMaps(checked) {
@@ -201,7 +384,7 @@
 
       markerLayer.clearLayers();
 
-      if (checked.length === 0) {
+      if (!checked.length) {
         mapTip.textContent = '暂无已签到定位点';
         return;
       }
@@ -229,11 +412,57 @@
       }
     }
 
-    async function fetchData() {
-      const res = await fetch(`/api/sessions/${sessionId}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '读取失败');
-      return data;
+    function renderLeaderboard(rows) {
+      if (!Array.isArray(rows) || !rows.length) {
+        rankBody.innerHTML = '<tr><td colspan="5" class="small">暂无数据</td></tr>';
+        return;
+      }
+      rankBody.innerHTML = rows.map((row, idx) => `
+        <tr>
+          <td>${idx + 1}</td>
+          <td>${escapeHtml(row.name)}</td>
+          <td>${row.completeCount}</td>
+          <td>${row.drawCount}</td>
+          <td>${row.completionRate}%</td>
+        </tr>
+      `).join('');
+    }
+
+    function renderFeed(logs) {
+      if (!Array.isArray(logs) || !logs.length) {
+        drawFeed.innerHTML = '<div class="feed-item small">暂无盲盒日志</div>';
+        return;
+      }
+      drawFeed.innerHTML = logs.slice(0, 120).map(log => `
+        <div class="feed-item">
+          <div><b>${escapeHtml(log.name)}</b> · ${escapeHtml(log.title)} ${log.completed ? '<span class="ok">已完成</span>' : '<span class="pending">待完成</span>'}</div>
+          <div>${escapeHtml(log.detail)}</div>
+          <div class="small">抽取：${escapeHtml(fmt(log.createdAt))}${log.completedAt ? ` · 完成：${escapeHtml(fmt(log.completedAt))}` : ''}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderPool(pool) {
+      if (document.activeElement && document.activeElement.closest('.pool-item')) {
+        return;
+      }
+      if (!Array.isArray(pool) || !pool.length) {
+        poolList.innerHTML = '<div class="pool-item small">暂无梗条目</div>';
+        return;
+      }
+
+      poolList.innerHTML = pool.map(item => `
+        <div class="pool-item" data-id="${escapeHtml(item.id)}">
+          <div class="small">ID: ${escapeHtml(item.id)}</div>
+          <input class="pool-title" type="text" maxlength="40" value="${escapeHtml(item.title)}" />
+          <textarea class="pool-detail" rows="2" maxlength="180">${escapeHtml(item.detail)}</textarea>
+          <label class="small" style="display:block;margin-top:6px;"><input class="pool-enabled" type="checkbox" ${item.enabled ? 'checked' : ''} /> 可抽取</label>
+          <div class="pool-actions">
+            <button class="pool-save">保存</button>
+            <button class="pool-delete btn-danger">删除</button>
+          </div>
+        </div>
+      `).join('');
     }
 
     function render(data) {
@@ -241,6 +470,9 @@
       totalEl.textContent = String(data.total);
       checkedEl.textContent = String(data.checked);
       absentEl.textContent = String(data.total - data.checked);
+      totalDrawEl.textContent = String(data.stats?.totalDraw ?? 0);
+      totalCompleteEl.textContent = String(data.stats?.totalComplete ?? 0);
+      overallRateEl.textContent = `${data.stats?.overallCompletionRate ?? 0}%`;
 
       tbody.innerHTML = data.students.map(s => `
         <tr>
@@ -249,18 +481,19 @@
           <td>${fmt(s.checkedInAt)}</td>
           <td>${fmtLocation(s.checkinLocation)}</td>
           <td>${photoCell(s.checkinPhoto)}</td>
+          <td>${s.drawCount || 0}</td>
+          <td>${s.completeCount || 0}</td>
         </tr>
       `).join('');
-      updateMap(data);
-    }
 
-    function escapeHtml(str) {
-      return String(str)
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
+      sRequireCheckin.checked = !!data.settings.requireCheckinBeforeDraw;
+      sShowWall.checked = !!data.settings.showRealtimeWall;
+      sAnonymous.checked = !!data.settings.anonymousWall;
+
+      renderLeaderboard(data.leaderboard || []);
+      renderFeed(data.drawLogs || []);
+      renderPool(data.blindboxPool || []);
+      updateMap(data);
     }
 
     async function tick() {
@@ -268,7 +501,7 @@
         const data = await fetchData();
         render(data);
       } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="5" class="pending">${err.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="danger">${escapeHtml(err.message)}</td></tr>`;
       }
     }
 
@@ -279,14 +512,16 @@
 
     function exportCSV() {
       if (!latest) return;
-      const rows = [['姓名', '状态', '签到时间', '签到位置(纬度,经度)', '是否有自拍']];
+      const rows = [['姓名', '状态', '签到时间', '签到位置(纬度,经度)', '是否有自拍', '抽取次数', '完成次数']];
       latest.students.forEach(s => {
         rows.push([
           s.name,
           s.checkedIn ? '已签到' : '未签到',
           fmt(s.checkedInAt),
           csvLocation(s.checkinLocation),
-          s.checkinPhoto ? '是' : '否'
+          s.checkinPhoto ? '是' : '否',
+          s.drawCount || 0,
+          s.completeCount || 0
         ]);
       });
       const csv = rows
@@ -296,16 +531,103 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `签到统计_${sessionId}.csv`;
+      a.download = `签到盲盒后台_${sessionId}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
     }
 
+    saveSettingsBtn.addEventListener('click', async () => {
+      saveSettingsBtn.disabled = true;
+      saveSettingsBtn.textContent = '保存中...';
+      settingsMsg.textContent = '';
+      try {
+        await postJson(`/api/sessions/${sessionId}/settings`, {
+          requireCheckinBeforeDraw: sRequireCheckin.checked,
+          showRealtimeWall: sShowWall.checked,
+          anonymousWall: sAnonymous.checked
+        });
+        settingsMsg.textContent = '开关保存成功';
+        await tick();
+      } catch (err) {
+        settingsMsg.textContent = err.message || '保存失败';
+      } finally {
+        saveSettingsBtn.disabled = false;
+        saveSettingsBtn.textContent = '保存开关';
+      }
+    });
+
+    addPoolBtn.addEventListener('click', async () => {
+      const title = newTitle.value.trim();
+      const detail = newDetail.value.trim();
+      if (!title || !detail) {
+        alert('标题和内容都要填写');
+        return;
+      }
+      addPoolBtn.disabled = true;
+      addPoolBtn.textContent = '新增中...';
+      try {
+        await postJson(`/api/sessions/${sessionId}/pool/add`, {
+          title,
+          detail,
+          enabled: newEnabled.checked
+        });
+        newTitle.value = '';
+        newDetail.value = '';
+        newEnabled.checked = true;
+        await tick();
+      } catch (err) {
+        alert(err.message || '新增失败');
+      } finally {
+        addPoolBtn.disabled = false;
+        addPoolBtn.textContent = '新增到梗池';
+      }
+    });
+
+    poolList.addEventListener('click', async e => {
+      const item = e.target.closest('.pool-item');
+      if (!item) return;
+      const id = item.dataset.id;
+
+      if (e.target.classList.contains('pool-save')) {
+        const title = item.querySelector('.pool-title').value.trim();
+        const detail = item.querySelector('.pool-detail').value.trim();
+        const enabled = item.querySelector('.pool-enabled').checked;
+        e.target.disabled = true;
+        e.target.textContent = '保存中...';
+        try {
+          await postJson(`/api/sessions/${sessionId}/pool/update`, { id, title, detail, enabled });
+          await tick();
+        } catch (err) {
+          alert(err.message || '保存失败');
+        } finally {
+          e.target.disabled = false;
+          e.target.textContent = '保存';
+        }
+      }
+
+      if (e.target.classList.contains('pool-delete')) {
+        if (!confirm('确定删除这条梗吗？')) return;
+        e.target.disabled = true;
+        e.target.textContent = '删除中...';
+        try {
+          await postJson(`/api/sessions/${sessionId}/pool/delete`, { id });
+          await tick();
+        } catch (err) {
+          alert(err.message || '删除失败');
+        } finally {
+          e.target.disabled = false;
+          e.target.textContent = '删除';
+        }
+      }
+    });
+
     exportBtn.addEventListener('click', exportCSV);
+    manualRefreshBtn.addEventListener('click', tick);
+
     tick();
-    setInterval(tick, 2000);
+    setInterval(tick, 5000);
   </script>
 </body>
 </html>
