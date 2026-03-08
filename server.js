@@ -6,13 +6,17 @@ const { randomUUID } = require('crypto');
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const DATA_FILE = path.join(__dirname, 'data.json');
+const SQLITE_FILE = path.join(__dirname, 'app.sqlite');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_DRAW_LOG = 400;
+const MAX_AUDIT_LOG = 300;
+const ACTION_COOLDOWN_MS = 2000;
 
 const DEFAULT_SETTINGS = {
   requireCheckinBeforeDraw: true,
   showRealtimeWall: true,
-  anonymousWall: false
+  anonymousWall: false,
+  obfuscateLocation: false
 };
 
 const DEFAULT_BLINDBOX_ITEMS = [
@@ -33,6 +37,23 @@ const DEFAULT_BLINDBOX_ITEMS = [
   { title: '夸自己一句', detail: '写一句今天做得不错的地方，别谦虚。' }
 ];
 
+function normalizeName(raw) {
+  return String(raw || '').trim();
+}
+
+function sanitizeText(raw, maxLen) {
+  return String(raw || '').trim().slice(0, maxLen);
+}
+
+function toDateKey(dateInput) {
+  const d = dateInput instanceof Date ? dateInput : new Date(dateInput);
+  if (Number.isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
 function withPoolIds(items) {
   return items.map(item => ({
     id: randomUUID().slice(0, 8),
@@ -42,28 +63,92 @@ function withPoolIds(items) {
   }));
 }
 
-function normalizeName(raw) {
-  return String(raw || '').trim();
+function genAdminKey() {
+  return randomUUID().replace(/-/g, '').slice(0, 18);
 }
 
-function loadData() {
+function genDrawToken() {
+  return randomUUID().replace(/-/g, '').slice(0, 12);
+}
+
+function initSqliteStore() {
+  try {
+    // Node >= 22 provides this builtin module.
+    const { DatabaseSync } = require('node:sqlite');
+    const db = new DatabaseSync(SQLITE_FILE);
+    db.exec('CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
+    return db;
+  } catch {
+    return null;
+  }
+}
+
+const sqliteDb = initSqliteStore();
+
+function loadFromFile() {
   try {
     const raw = fs.readFileSync(DATA_FILE, 'utf8');
     const parsed = JSON.parse(raw);
-    if (!parsed.sessions || typeof parsed.sessions !== 'object') {
-      return { sessions: {} };
-    }
-    Object.values(parsed.sessions).forEach(ensureSessionShape);
+    if (!parsed.sessions || typeof parsed.sessions !== 'object') return { sessions: {} };
     return parsed;
   } catch {
     return { sessions: {} };
   }
 }
 
+function loadFromSqlite() {
+  if (!sqliteDb) return { sessions: {} };
+  try {
+    const stmt = sqliteDb.prepare('SELECT v FROM kv WHERE k = ?');
+    const row = stmt.get('sessions');
+    if (!row || typeof row.v !== 'string') return { sessions: {} };
+    const parsed = JSON.parse(row.v);
+    if (!parsed.sessions || typeof parsed.sessions !== 'object') return { sessions: {} };
+    return parsed;
+  } catch {
+    return { sessions: {} };
+  }
+}
+
+function saveToSqlite(payload) {
+  if (!sqliteDb) return;
+  const stmt = sqliteDb.prepare('INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)');
+  stmt.run('sessions', JSON.stringify(payload));
+}
+
+function loadData() {
+  const fileData = loadFromFile();
+  if (!sqliteDb) return fileData;
+
+  const sqlData = loadFromSqlite();
+  const sqlCount = Object.keys(sqlData.sessions || {}).length;
+  const fileCount = Object.keys(fileData.sessions || {}).length;
+
+  if (sqlCount > 0) return sqlData;
+  if (fileCount > 0) {
+    saveToSqlite(fileData);
+    return fileData;
+  }
+  return { sessions: {} };
+}
+
 const data = loadData();
 
 function saveData() {
+  if (sqliteDb) {
+    saveToSqlite(data);
+  }
+  // Keep JSON backup for portability and debugging.
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+}
+
+function blurLocation(loc) {
+  if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return null;
+  return {
+    lat: Number(Number(loc.lat).toFixed(3)),
+    lng: Number(Number(loc.lng).toFixed(3)),
+    accuracy: loc.accuracy
+  };
 }
 
 function send(res, status, payload, type = 'application/json; charset=utf-8') {
@@ -71,7 +156,7 @@ function send(res, status, payload, type = 'application/json; charset=utf-8') {
     'Content-Type': type,
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type'
+    'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Key, X-Admin-Actor'
   });
   res.end(type.includes('application/json') ? JSON.stringify(payload) : payload);
 }
@@ -136,11 +221,97 @@ function normalizePhotoDataUrl(raw) {
   return value;
 }
 
+function ensureStudentShape(student) {
+  student.name = normalizeName(student.name);
+  if (typeof student.checkedIn !== 'boolean') student.checkedIn = false;
+  if (typeof student.checkedInAt !== 'string') student.checkedInAt = '';
+  if (!student.checkinLocation || typeof student.checkinLocation !== 'object') {
+    student.checkinLocation = null;
+  }
+  if (typeof student.checkinPhoto !== 'string') student.checkinPhoto = '';
+  if (typeof student.drawCount !== 'number' || student.drawCount < 0) student.drawCount = 0;
+  if (typeof student.completeCount !== 'number' || student.completeCount < 0) student.completeCount = 0;
+  if (typeof student.drawToken !== 'string') student.drawToken = '';
+  if (typeof student.lastDrawAt !== 'number' || student.lastDrawAt < 0) student.lastDrawAt = 0;
+  if (typeof student.lastCompleteAt !== 'number' || student.lastCompleteAt < 0) student.lastCompleteAt = 0;
+}
+
+function ensureSessionShape(session) {
+  if (!session || typeof session !== 'object') return;
+  if (!Array.isArray(session.students)) session.students = [];
+  if (!Array.isArray(session.drawLogs)) session.drawLogs = [];
+  if (!Array.isArray(session.auditLogs)) session.auditLogs = [];
+
+  if (!session.settings || typeof session.settings !== 'object') {
+    session.settings = { ...DEFAULT_SETTINGS };
+  } else {
+    session.settings = {
+      requireCheckinBeforeDraw: session.settings.requireCheckinBeforeDraw !== false,
+      showRealtimeWall: session.settings.showRealtimeWall !== false,
+      anonymousWall: !!session.settings.anonymousWall,
+      obfuscateLocation: !!session.settings.obfuscateLocation
+    };
+  }
+
+  if (typeof session.adminKey !== 'string' || !session.adminKey) {
+    session.adminKey = genAdminKey();
+  }
+
+  if (!Array.isArray(session.blindboxPool) || !session.blindboxPool.length) {
+    session.blindboxPool = withPoolIds(DEFAULT_BLINDBOX_ITEMS);
+  }
+
+  session.blindboxPool = session.blindboxPool
+    .map(item => ({
+      id: normalizeName(item && item.id) || randomUUID().slice(0, 8),
+      title: sanitizeText(item && item.title, 40),
+      detail: sanitizeText(item && item.detail, 180),
+      enabled: item && item.enabled !== false
+    }))
+    .filter(item => item.title && item.detail);
+
+  if (!session.blindboxPool.length) {
+    session.blindboxPool = withPoolIds(DEFAULT_BLINDBOX_ITEMS);
+  }
+  if (!session.blindboxPool.some(item => item.enabled)) {
+    session.blindboxPool[0].enabled = true;
+  }
+
+  session.students.forEach(ensureStudentShape);
+
+  session.drawLogs = session.drawLogs
+    .map(log => ({
+      id: normalizeName(log && log.id) || randomUUID().slice(0, 8),
+      name: normalizeName(log && log.name),
+      title: sanitizeText(log && log.title, 40),
+      detail: sanitizeText(log && log.detail, 180),
+      createdAt: typeof (log && log.createdAt) === 'string' ? log.createdAt : new Date().toISOString(),
+      completed: !!(log && log.completed),
+      completedAt: typeof (log && log.completedAt) === 'string' ? log.completedAt : ''
+    }))
+    .filter(log => log.name && log.title && log.detail);
+
+  session.auditLogs = session.auditLogs
+    .map(log => ({
+      id: normalizeName(log && log.id) || randomUUID().slice(0, 8),
+      action: sanitizeText(log && log.action, 40) || 'unknown',
+      detail: sanitizeText(log && log.detail, 240),
+      actor: sanitizeText(log && log.actor, 40) || 'teacher',
+      ip: sanitizeText(log && log.ip, 80),
+      createdAt: typeof (log && log.createdAt) === 'string' ? log.createdAt : new Date().toISOString()
+    }))
+    .filter(log => log.action);
+}
+
+Object.values(data.sessions).forEach(ensureSessionShape);
+saveData();
+
 function createSession(names) {
   const id = randomUUID().slice(0, 8);
   data.sessions[id] = {
     id,
     createdAt: new Date().toISOString(),
+    adminKey: genAdminKey(),
     settings: { ...DEFAULT_SETTINGS },
     blindboxPool: withPoolIds(DEFAULT_BLINDBOX_ITEMS),
     students: names.map(name => ({
@@ -151,71 +322,45 @@ function createSession(names) {
       checkinPhoto: '',
       drawCount: 0,
       completeCount: 0,
-      drawToken: ''
+      drawToken: '',
+      lastDrawAt: 0,
+      lastCompleteAt: 0
     })),
-    drawLogs: []
+    drawLogs: [],
+    auditLogs: []
   };
   saveData();
   return id;
 }
 
-function ensureSessionShape(session) {
-  if (!session || typeof session !== 'object') return;
-  if (!Array.isArray(session.students)) session.students = [];
-  if (!Array.isArray(session.drawLogs)) session.drawLogs = [];
-  if (!session.settings || typeof session.settings !== 'object') {
-    session.settings = { ...DEFAULT_SETTINGS };
-  } else {
-    session.settings = {
-      requireCheckinBeforeDraw: !!session.settings.requireCheckinBeforeDraw,
-      showRealtimeWall: session.settings.showRealtimeWall !== false,
-      anonymousWall: !!session.settings.anonymousWall
-    };
+function getSessionOr404(res, id) {
+  const session = data.sessions[id];
+  if (!session) {
+    send(res, 404, { error: '场次不存在' });
+    return null;
   }
-  if (!Array.isArray(session.blindboxPool) || !session.blindboxPool.length) {
-    session.blindboxPool = withPoolIds(DEFAULT_BLINDBOX_ITEMS);
-  }
-
-  session.blindboxPool = session.blindboxPool.map(item => ({
-    id: normalizeName(item && item.id) || randomUUID().slice(0, 8),
-    title: sanitizePoolText(item && item.title, 40),
-    detail: sanitizePoolText(item && item.detail, 180),
-    enabled: item && item.enabled !== false
-  })).filter(item => item.title && item.detail);
-
-  if (!session.blindboxPool.length) {
-    session.blindboxPool = withPoolIds(DEFAULT_BLINDBOX_ITEMS);
-  }
-  if (!session.blindboxPool.some(item => item.enabled)) {
-    session.blindboxPool[0].enabled = true;
-  }
-
-  session.students.forEach(student => {
-    student.name = normalizeName(student.name);
-    if (typeof student.checkedIn !== 'boolean') student.checkedIn = false;
-    if (typeof student.checkedInAt !== 'string') student.checkedInAt = '';
-    if (!student.checkinLocation || typeof student.checkinLocation !== 'object') {
-      student.checkinLocation = null;
-    }
-    if (typeof student.checkinPhoto !== 'string') student.checkinPhoto = '';
-    if (typeof student.drawCount !== 'number' || student.drawCount < 0) student.drawCount = 0;
-    if (typeof student.completeCount !== 'number' || student.completeCount < 0) student.completeCount = 0;
-    if (typeof student.drawToken !== 'string') student.drawToken = '';
-  });
-
-  session.drawLogs = session.drawLogs.map(log => ({
-    id: normalizeName(log && log.id) || randomUUID().slice(0, 8),
-    name: normalizeName(log && log.name),
-    title: sanitizePoolText(log && log.title, 40),
-    detail: sanitizePoolText(log && log.detail, 180),
-    createdAt: typeof (log && log.createdAt) === 'string' ? log.createdAt : new Date().toISOString(),
-    completed: !!(log && log.completed),
-    completedAt: typeof (log && log.completedAt) === 'string' ? log.completedAt : ''
-  })).filter(log => log.name && log.title && log.detail);
+  ensureSessionShape(session);
+  return session;
 }
 
-function sanitizePoolText(raw, maxLen) {
-  return String(raw || '').trim().slice(0, maxLen);
+function pickBlindboxFromSession(session) {
+  const enabled = session.blindboxPool.filter(item => item.enabled);
+  if (!enabled.length) return null;
+  const idx = Math.floor(Math.random() * enabled.length);
+  return enabled[idx];
+}
+
+function ensureStudentToken(student) {
+  if (!student.drawToken) {
+    student.drawToken = genDrawToken();
+  }
+  return student.drawToken;
+}
+
+function verifyDrawIdentity(student, token) {
+  const safe = normalizeName(token);
+  if (!safe || !student.drawToken || safe !== student.drawToken) return false;
+  return true;
 }
 
 function maskNameInSession(session, name) {
@@ -225,10 +370,10 @@ function maskNameInSession(session, name) {
 }
 
 function renderDrawLogForClient(session, log) {
-  const name = session.settings.anonymousWall ? maskNameInSession(session, log.name) : log.name;
+  const displayName = session.settings.anonymousWall ? maskNameInSession(session, log.name) : log.name;
   return {
     id: log.id,
-    name,
+    name: displayName,
     title: log.title,
     detail: log.detail,
     createdAt: log.createdAt,
@@ -257,12 +402,30 @@ function buildLeaderboard(session) {
     });
 }
 
-function toPublicStudent(student) {
+function buildClassBadges(session) {
+  const total = session.students.length;
+  const checked = session.students.filter(s => s.checkedIn).length;
+  const totalDraw = session.students.reduce((acc, s) => acc + (Number(s.drawCount) || 0), 0);
+  const totalComplete = session.students.reduce((acc, s) => acc + (Number(s.completeCount) || 0), 0);
+  const rate = totalDraw > 0 ? Math.round((totalComplete / totalDraw) * 100) : 0;
+
+  const badges = [];
+  if (total > 0 && checked === total) badges.push('全员到齐');
+  if (totalDraw >= Math.max(10, total * 3)) badges.push('抽卡活跃班');
+  if (totalComplete >= Math.max(5, total)) badges.push('执行力班');
+  if (totalDraw >= 5 && rate >= 70) badges.push('高完成率');
+  if (session.settings.anonymousWall) badges.push('匿名护盾');
+
+  return badges.map((label, idx) => ({ id: `badge-${idx + 1}`, label }));
+}
+
+function toPublicStudent(session, student) {
+  const location = session.settings.obfuscateLocation ? blurLocation(student.checkinLocation) : student.checkinLocation;
   return {
     name: student.name,
     checkedIn: student.checkedIn,
     checkedInAt: student.checkedInAt,
-    checkinLocation: student.checkinLocation,
+    checkinLocation: location,
     checkinPhoto: student.checkinPhoto,
     drawCount: student.drawCount,
     completeCount: student.completeCount
@@ -276,15 +439,17 @@ function toPublicSession(session) {
     createdAt: session.createdAt,
     total: session.students.length,
     checked: session.students.filter(s => s.checkedIn).length,
-    students: session.students.map(toPublicStudent),
+    students: session.students.map(s => toPublicStudent(session, s)),
     drawLogs: session.settings.showRealtimeWall
       ? session.drawLogs.map(log => renderDrawLogForClient(session, log))
       : [],
     leaderboard: buildLeaderboard(session),
+    classBadges: buildClassBadges(session),
     settings: {
       requireCheckinBeforeDraw: session.settings.requireCheckinBeforeDraw,
       showRealtimeWall: session.settings.showRealtimeWall,
-      anonymousWall: session.settings.anonymousWall
+      anonymousWall: session.settings.anonymousWall,
+      obfuscateLocation: session.settings.obfuscateLocation
     }
   };
 }
@@ -293,10 +458,12 @@ function toAdminSession(session) {
   ensureSessionShape(session);
   const totalDraw = session.students.reduce((acc, s) => acc + (Number(s.drawCount) || 0), 0);
   const totalComplete = session.students.reduce((acc, s) => acc + (Number(s.completeCount) || 0), 0);
+
   return {
     ...toPublicSession(session),
     drawLogs: session.drawLogs,
     blindboxPool: session.blindboxPool,
+    auditLogs: session.auditLogs.slice(0, 200),
     stats: {
       totalDraw,
       totalComplete,
@@ -305,34 +472,79 @@ function toAdminSession(session) {
   };
 }
 
-function getSessionOr404(res, id) {
-  const session = data.sessions[id];
-  if (!session) {
-    send(res, 404, { error: '场次不存在' });
-    return null;
+function calcCurrentStreakDays(logs) {
+  const doneDates = new Set(
+    logs
+      .filter(log => log.completed && log.completedAt)
+      .map(log => toDateKey(log.completedAt))
+      .filter(Boolean)
+  );
+  let streak = 0;
+  const cursor = new Date();
+  while (true) {
+    const key = toDateKey(cursor);
+    if (!doneDates.has(key)) break;
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
   }
-  ensureSessionShape(session);
-  return session;
+  return streak;
 }
 
-function pickBlindboxFromSession(session) {
-  const enabled = session.blindboxPool.filter(item => item.enabled);
-  if (!enabled.length) return null;
-  const idx = Math.floor(Math.random() * enabled.length);
-  return enabled[idx];
-}
-
-function ensureStudentToken(student) {
-  if (!student.drawToken) {
-    student.drawToken = randomUUID().replace(/-/g, '').slice(0, 12);
+function getClientIp(req) {
+  const xf = req.headers['x-forwarded-for'];
+  if (typeof xf === 'string' && xf.trim()) {
+    return xf.split(',')[0].trim();
   }
-  return student.drawToken;
+  return req.socket?.remoteAddress || '';
 }
 
-function verifyDrawIdentity(student, token) {
-  const safeToken = normalizeName(token);
-  if (!safeToken || !student.drawToken || safeToken !== student.drawToken) return false;
+function resolveActor(req, url, body) {
+  const byBody = sanitizeText(body && body.actor, 40);
+  const byHeader = sanitizeText(req.headers['x-admin-actor'], 40);
+  const byQuery = sanitizeText(url.searchParams.get('actor'), 40);
+  return byBody || byHeader || byQuery || 'teacher';
+}
+
+function addAuditLog(session, req, actor, action, detail) {
+  session.auditLogs.unshift({
+    id: randomUUID().slice(0, 8),
+    action: sanitizeText(action, 40) || 'unknown',
+    detail: sanitizeText(detail, 240),
+    actor: sanitizeText(actor, 40) || 'teacher',
+    ip: sanitizeText(getClientIp(req), 80),
+    createdAt: new Date().toISOString()
+  });
+  if (session.auditLogs.length > MAX_AUDIT_LOG) {
+    session.auditLogs.length = MAX_AUDIT_LOG;
+  }
+}
+
+function readAdminKey(req, url, body) {
+  const fromHeader = normalizeName(req.headers['x-admin-key']);
+  const fromQuery = normalizeName(url.searchParams.get('k'));
+  const fromBody = normalizeName(body && body.adminKey);
+  return fromHeader || fromQuery || fromBody;
+}
+
+function isAdminAuthorized(session, key) {
+  const safe = normalizeName(key);
+  return !!safe && safe === session.adminKey;
+}
+
+function requireAdminAuth(req, res, url, session, body = null) {
+  const key = readAdminKey(req, url, body);
+  if (!isAdminAuthorized(session, key)) {
+    send(res, 401, { error: '管理口令无效，请使用完整后台链接' });
+    return false;
+  }
   return true;
+}
+
+function checkActionCooldown(lastTs, nowTs) {
+  if (!lastTs) return 0;
+  const elapsed = nowTs - lastTs;
+  if (elapsed >= ACTION_COOLDOWN_MS) return 0;
+  return ACTION_COOLDOWN_MS - elapsed;
 }
 
 function serveFile(res, filePath) {
@@ -365,12 +577,18 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await parseBody(req);
       const names = sanitizeNames(body.students);
-      if (names.length === 0) {
+      if (!names.length) {
         send(res, 400, { error: '请至少提供 1 个学生名字' });
         return;
       }
       const id = createSession(names);
-      send(res, 200, { id, adminUrl: `/admin/${id}`, checkinUrl: `/checkin/${id}` });
+      const session = data.sessions[id];
+      send(res, 200, {
+        id,
+        adminUrl: `/admin/${id}?k=${encodeURIComponent(session.adminKey)}`,
+        checkinUrl: `/checkin/${id}`,
+        adminKey: session.adminKey
+      });
     } catch (err) {
       send(res, 400, { error: err.message || '请求错误' });
     }
@@ -381,6 +599,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && adminGetMatch) {
     const session = getSessionOr404(res, adminGetMatch[1]);
     if (!session) return;
+    if (!requireAdminAuth(req, res, url, session)) return;
     send(res, 200, toAdminSession(session));
     return;
   }
@@ -398,12 +617,14 @@ const server = http.createServer(async (req, res) => {
     try {
       const session = getSessionOr404(res, checkinMatch[1]);
       if (!session) return;
+
       const body = await parseBody(req);
       const name = normalizeName(body.name);
       if (!name) {
         send(res, 400, { error: '名字不能为空' });
         return;
       }
+
       const student = session.students.find(s => s.name === name);
       if (!student) {
         send(res, 404, { error: '名单里没有这个名字' });
@@ -413,6 +634,7 @@ const server = http.createServer(async (req, res) => {
         send(res, 409, { error: '该同学已签到' });
         return;
       }
+
       const location = normalizeLocation(body.location);
       if (!location) {
         send(res, 400, { error: '未获取到定位信息，请开启定位后重试' });
@@ -434,7 +656,7 @@ const server = http.createServer(async (req, res) => {
       send(res, 200, {
         ok: true,
         checkedInAt: student.checkedInAt,
-        location: student.checkinLocation,
+        location: session.settings.obfuscateLocation ? blurLocation(student.checkinLocation) : student.checkinLocation,
         drawToken
       });
     } catch (err) {
@@ -448,6 +670,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const session = getSessionOr404(res, claimTokenMatch[1]);
       if (!session) return;
+
       const body = await parseBody(req);
       const name = normalizeName(body.name);
       if (!name) {
@@ -467,6 +690,7 @@ const server = http.createServer(async (req, res) => {
         send(res, 409, { error: '这个名字已在另一设备绑定口令，请在原设备操作' });
         return;
       }
+
       const drawToken = ensureStudentToken(student);
       saveData();
       send(res, 200, { ok: true, drawToken });
@@ -489,6 +713,7 @@ const server = http.createServer(async (req, res) => {
         send(res, 400, { error: '名字不能为空' });
         return;
       }
+
       const student = session.students.find(s => s.name === name);
       if (!student) {
         send(res, 404, { error: '名单里没有这个名字' });
@@ -499,7 +724,14 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       if (!verifyDrawIdentity(student, token)) {
-        send(res, 401, { error: '口令校验失败，请在你的签到设备操作' });
+        send(res, 401, { error: '口令校验失败，请在绑定口令的设备操作' });
+        return;
+      }
+
+      const nowMs = Date.now();
+      const waitMs = checkActionCooldown(student.lastDrawAt, nowMs);
+      if (waitMs > 0) {
+        send(res, 429, { error: `操作太快啦，请 ${Math.ceil(waitMs / 1000)} 秒后再抽`, retryAfterMs: waitMs });
         return;
       }
 
@@ -509,13 +741,12 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const now = new Date().toISOString();
       const log = {
         id: randomUUID().slice(0, 8),
         name: student.name,
         title: picked.title,
         detail: picked.detail,
-        createdAt: now,
+        createdAt: new Date().toISOString(),
         completed: false,
         completedAt: ''
       };
@@ -525,6 +756,7 @@ const server = http.createServer(async (req, res) => {
         session.drawLogs.length = MAX_DRAW_LOG;
       }
       student.drawCount += 1;
+      student.lastDrawAt = nowMs;
       saveData();
 
       send(res, 200, {
@@ -561,7 +793,14 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       if (!verifyDrawIdentity(student, token)) {
-        send(res, 401, { error: '口令校验失败，请在你的签到设备操作' });
+        send(res, 401, { error: '口令校验失败，请在绑定口令的设备操作' });
+        return;
+      }
+
+      const nowMs = Date.now();
+      const waitMs = checkActionCooldown(student.lastCompleteAt, nowMs);
+      if (waitMs > 0) {
+        send(res, 429, { error: `操作太快啦，请 ${Math.ceil(waitMs / 1000)} 秒后再提交`, retryAfterMs: waitMs });
         return;
       }
 
@@ -584,6 +823,7 @@ const server = http.createServer(async (req, res) => {
       target.completed = true;
       target.completedAt = new Date().toISOString();
       student.completeCount += 1;
+      student.lastCompleteAt = nowMs;
       saveData();
 
       send(res, 200, {
@@ -599,12 +839,56 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  const meMatch = pathname.match(/^\/api\/sessions\/([a-zA-Z0-9-]+)\/me$/);
+  if (req.method === 'POST' && meMatch) {
+    try {
+      const session = getSessionOr404(res, meMatch[1]);
+      if (!session) return;
+
+      const body = await parseBody(req);
+      const name = normalizeName(body.name);
+      const token = normalizeName(body.token);
+      if (!name) {
+        send(res, 400, { error: '名字不能为空' });
+        return;
+      }
+
+      const student = session.students.find(s => s.name === name);
+      if (!student) {
+        send(res, 404, { error: '名单里没有这个名字' });
+        return;
+      }
+      if (!verifyDrawIdentity(student, token)) {
+        send(res, 401, { error: '口令校验失败，请重新绑定口令' });
+        return;
+      }
+
+      const history = session.drawLogs
+        .filter(log => log.name === student.name)
+        .slice(0, 80);
+
+      send(res, 200, {
+        ok: true,
+        name: student.name,
+        drawCount: student.drawCount,
+        completeCount: student.completeCount,
+        streakDays: calcCurrentStreakDays(history),
+        history
+      });
+    } catch (err) {
+      send(res, 400, { error: err.message || '请求错误' });
+    }
+    return;
+  }
+
   const settingsMatch = pathname.match(/^\/api\/sessions\/([a-zA-Z0-9-]+)\/settings$/);
   if (req.method === 'POST' && settingsMatch) {
     try {
       const session = getSessionOr404(res, settingsMatch[1]);
       if (!session) return;
+
       const body = await parseBody(req);
+      if (!requireAdminAuth(req, res, url, session, body)) return;
 
       if (typeof body.requireCheckinBeforeDraw === 'boolean') {
         session.settings.requireCheckinBeforeDraw = body.requireCheckinBeforeDraw;
@@ -615,9 +899,38 @@ const server = http.createServer(async (req, res) => {
       if (typeof body.anonymousWall === 'boolean') {
         session.settings.anonymousWall = body.anonymousWall;
       }
+      if (typeof body.obfuscateLocation === 'boolean') {
+        session.settings.obfuscateLocation = body.obfuscateLocation;
+      }
 
+      const actor = resolveActor(req, url, body);
+      addAuditLog(session, req, actor, 'settings.update', '更新了场次开关配置');
       saveData();
       send(res, 200, { ok: true, settings: session.settings });
+    } catch (err) {
+      send(res, 400, { error: err.message || '请求错误' });
+    }
+    return;
+  }
+
+  const privacyClearMatch = pathname.match(/^\/api\/sessions\/([a-zA-Z0-9-]+)\/privacy\/clear$/);
+  if (req.method === 'POST' && privacyClearMatch) {
+    try {
+      const session = getSessionOr404(res, privacyClearMatch[1]);
+      if (!session) return;
+
+      const body = await parseBody(req);
+      if (!requireAdminAuth(req, res, url, session, body)) return;
+
+      session.students.forEach(student => {
+        student.checkinLocation = null;
+        student.checkinPhoto = '';
+      });
+
+      const actor = resolveActor(req, url, body);
+      addAuditLog(session, req, actor, 'privacy.clear', '一键清空了全部自拍和定位数据');
+      saveData();
+      send(res, 200, { ok: true });
     } catch (err) {
       send(res, 400, { error: err.message || '请求错误' });
     }
@@ -629,22 +942,22 @@ const server = http.createServer(async (req, res) => {
     try {
       const session = getSessionOr404(res, poolAddMatch[1]);
       if (!session) return;
-      const body = await parseBody(req);
 
-      const title = sanitizePoolText(body.title, 40);
-      const detail = sanitizePoolText(body.detail, 180);
+      const body = await parseBody(req);
+      if (!requireAdminAuth(req, res, url, session, body)) return;
+
+      const title = sanitizeText(body.title, 40);
+      const detail = sanitizeText(body.detail, 180);
       const enabled = body.enabled !== false;
       if (!title || !detail) {
         send(res, 400, { error: '标题和内容都不能为空' });
         return;
       }
 
-      session.blindboxPool.unshift({
-        id: randomUUID().slice(0, 8),
-        title,
-        detail,
-        enabled
-      });
+      session.blindboxPool.unshift({ id: randomUUID().slice(0, 8), title, detail, enabled });
+
+      const actor = resolveActor(req, url, body);
+      addAuditLog(session, req, actor, 'pool.add', `新增梗：${title}`);
       saveData();
       send(res, 200, { ok: true, blindboxPool: session.blindboxPool });
     } catch (err) {
@@ -658,7 +971,10 @@ const server = http.createServer(async (req, res) => {
     try {
       const session = getSessionOr404(res, poolUpdateMatch[1]);
       if (!session) return;
+
       const body = await parseBody(req);
+      if (!requireAdminAuth(req, res, url, session, body)) return;
+
       const id = normalizeName(body.id);
       if (!id) {
         send(res, 400, { error: '缺少条目 ID' });
@@ -674,8 +990,8 @@ const server = http.createServer(async (req, res) => {
       const current = session.blindboxPool[idx];
       const next = {
         ...current,
-        title: typeof body.title === 'string' ? sanitizePoolText(body.title, 40) : current.title,
-        detail: typeof body.detail === 'string' ? sanitizePoolText(body.detail, 180) : current.detail,
+        title: typeof body.title === 'string' ? sanitizeText(body.title, 40) : current.title,
+        detail: typeof body.detail === 'string' ? sanitizeText(body.detail, 180) : current.detail,
         enabled: typeof body.enabled === 'boolean' ? body.enabled : current.enabled
       };
 
@@ -691,6 +1007,8 @@ const server = http.createServer(async (req, res) => {
       }
 
       session.blindboxPool = candidatePool;
+      const actor = resolveActor(req, url, body);
+      addAuditLog(session, req, actor, 'pool.update', `更新梗：${next.title}`);
       saveData();
       send(res, 200, { ok: true, blindboxPool: session.blindboxPool });
     } catch (err) {
@@ -704,7 +1022,10 @@ const server = http.createServer(async (req, res) => {
     try {
       const session = getSessionOr404(res, poolDeleteMatch[1]);
       if (!session) return;
+
       const body = await parseBody(req);
+      if (!requireAdminAuth(req, res, url, session, body)) return;
+
       const id = normalizeName(body.id);
       if (!id) {
         send(res, 400, { error: '缺少条目 ID' });
@@ -715,6 +1036,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
+      const target = session.blindboxPool.find(item => item.id === id);
       const nextPool = session.blindboxPool.filter(item => item.id !== id);
       if (nextPool.length === session.blindboxPool.length) {
         send(res, 404, { error: '梗条目不存在' });
@@ -725,6 +1047,8 @@ const server = http.createServer(async (req, res) => {
       }
 
       session.blindboxPool = nextPool;
+      const actor = resolveActor(req, url, body);
+      addAuditLog(session, req, actor, 'pool.delete', `删除梗：${target ? target.title : id}`);
       saveData();
       send(res, 200, { ok: true, blindboxPool: session.blindboxPool });
     } catch (err) {
@@ -739,6 +1063,14 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && pathname.match(/^\/admin\/[a-zA-Z0-9-]+$/)) {
+    const id = pathname.split('/').pop();
+    const session = getSessionOr404(res, id);
+    if (!session) return;
+    const key = normalizeName(url.searchParams.get('k'));
+    if (!isAdminAuthorized(session, key)) {
+      send(res, 403, 'Forbidden: invalid admin key', 'text/plain; charset=utf-8');
+      return;
+    }
     serveFile(res, path.join(PUBLIC_DIR, 'admin.html'));
     return;
   }
@@ -753,4 +1085,9 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`Check-in app running at http://${HOST}:${PORT}`);
+  if (sqliteDb) {
+    console.log(`SQLite persistence enabled at ${SQLITE_FILE}`);
+  } else {
+    console.log('SQLite module unavailable, using JSON persistence');
+  }
 });

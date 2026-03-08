@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>签到 + 盲盒后台 v4.0</title>
+  <title>签到 + 盲盒后台 v5.0</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     :root {
@@ -25,7 +25,7 @@
       color: var(--text);
       padding: 16px;
     }
-    .wrap { max-width: 1120px; margin: 0 auto; }
+    .wrap { max-width: 1160px; margin: 0 auto; }
     .card {
       background: var(--card);
       border: 1px solid var(--line);
@@ -33,6 +33,7 @@
       padding: 14px;
       margin-bottom: 12px;
     }
+    h2, h3 { margin: 0 0 8px; }
     .stats {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -55,8 +56,13 @@
       grid-template-columns: 1fr 1fr;
       gap: 12px;
     }
-    @media (max-width: 900px) {
-      .grid-2 { grid-template-columns: 1fr; }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 1000px) {
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
     }
     table { width: 100%; border-collapse: collapse; }
     th, td {
@@ -142,7 +148,8 @@
       background: #fafafa;
     }
     .pool-add input, .pool-add textarea,
-    .pool-item input, .pool-item textarea {
+    .pool-item input, .pool-item textarea,
+    #actorInput {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -183,17 +190,36 @@
       font-size: 14px;
     }
     .feed-item:last-child { border-bottom: 0; }
+    .danger-box {
+      border: 1px solid #fecaca;
+      border-radius: 10px;
+      background: #fff1f2;
+      padding: 10px;
+    }
+    .badge {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 8px;
+      border: 1px solid var(--line);
+      margin-right: 6px;
+      margin-bottom: 6px;
+      font-size: 12px;
+      background: #fff;
+    }
   </style>
 </head>
 <body>
   <main class="wrap">
     <section class="card">
-      <h2 style="margin:0 0 8px;">签到 + 盲盒后台 v4.0</h2>
-      <div class="small">每 5 秒自动刷新（梗池编辑时不会覆盖你正在输入的内容）</div>
-      <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+      <h2>签到 + 盲盒后台 v5.0</h2>
+      <div class="small">后台已启用管理口令校验。页面每 5 秒自动刷新。</div>
+      <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
         <button id="exportBtn">导出 CSV</button>
         <button id="manualRefreshBtn" class="btn-muted">手动刷新</button>
+        <input id="actorInput" type="text" maxlength="30" placeholder="操作人（例如 班长 / 老师）" style="max-width:280px;margin-top:0;" />
       </div>
+      <div class="small" id="authTip" style="margin-top:8px;"></div>
+
       <div class="stats" style="margin-top:10px;">
         <div class="stat">应到<b id="total">0</b></div>
         <div class="stat">已到<b id="checked">0</b></div>
@@ -206,18 +232,19 @@
 
     <section class="grid-2">
       <article class="card">
-        <h3 style="margin:0 0 8px;">场次开关</h3>
+        <h3>场次开关</h3>
         <div class="switches">
           <label class="switch-item"><input type="checkbox" id="sRequireCheckin" /> 只允许先签到再抽卡</label>
           <label class="switch-item"><input type="checkbox" id="sShowWall" /> 显示全员实时盲盒墙</label>
           <label class="switch-item"><input type="checkbox" id="sAnonymous" /> 实时墙和排行榜匿名显示</label>
+          <label class="switch-item"><input type="checkbox" id="sObfuscate" /> 学生端位置模糊显示（保留 3 位小数）</label>
         </div>
         <button id="saveSettingsBtn" style="margin-top:10px;">保存开关</button>
         <div class="small" id="settingsMsg" style="margin-top:8px;"></div>
       </article>
 
       <article class="card">
-        <h3 style="margin:0 0 8px;">完成榜（按完成数）</h3>
+        <h3>完成榜（按完成数）</h3>
         <table>
           <thead>
             <tr><th>#</th><th>同学</th><th>完成</th><th>抽取</th><th>完成率</th></tr>
@@ -225,6 +252,11 @@
           <tbody id="rankBody"></tbody>
         </table>
       </article>
+    </section>
+
+    <section class="card">
+      <h3 style="margin-bottom:8px;">班级徽章</h3>
+      <div id="badgeWrap" class="small"></div>
     </section>
 
     <section class="card">
@@ -236,21 +268,36 @@
       <div id="fallbackMaps" class="fallback-grid"></div>
     </section>
 
+    <section class="grid-2">
+      <article class="card">
+        <h3>自定义梗池</h3>
+        <div class="pool-add">
+          <div class="small">新增梗</div>
+          <input id="newTitle" type="text" maxlength="40" placeholder="标题（最多 40 字）" />
+          <textarea id="newDetail" rows="3" maxlength="180" placeholder="内容（最多 180 字）"></textarea>
+          <label class="small" style="display:block;margin-top:8px;"><input id="newEnabled" type="checkbox" checked /> 立即启用</label>
+          <button id="addPoolBtn" style="margin-top:8px;">新增到梗池</button>
+        </div>
+        <div id="poolList" class="pool-list"></div>
+      </article>
+
+      <article class="card">
+        <h3>操作审计日志</h3>
+        <div id="auditFeed" class="feed"></div>
+      </article>
+    </section>
+
     <section class="card">
-      <h3 style="margin:0 0 8px;">自定义梗池</h3>
-      <div class="pool-add">
-        <div class="small">新增梗</div>
-        <input id="newTitle" type="text" maxlength="40" placeholder="标题（最多 40 字）" />
-        <textarea id="newDetail" rows="3" maxlength="180" placeholder="内容（最多 180 字）"></textarea>
-        <label class="small" style="display:block;margin-top:8px;"><input id="newEnabled" type="checkbox" checked /> 立即启用</label>
-        <button id="addPoolBtn" style="margin-top:8px;">新增到梗池</button>
+      <div class="danger-box">
+        <h3 style="margin-bottom:8px;">隐私清理</h3>
+        <div class="small">课后可一键清空全部定位和自拍（不可恢复）。</div>
+        <button id="clearPrivacyBtn" class="btn-danger" style="margin-top:8px;">一键清空定位和自拍</button>
       </div>
-      <div id="poolList" class="pool-list"></div>
     </section>
 
     <section class="grid-2">
       <article class="card">
-        <h3 style="margin:0 0 8px;">全班签到明细</h3>
+        <h3>全班签到明细</h3>
         <table>
           <thead>
             <tr><th>姓名</th><th>状态</th><th>签到时间</th><th>位置</th><th>自拍</th><th>抽取</th><th>完成</th></tr>
@@ -260,7 +307,7 @@
       </article>
 
       <article class="card">
-        <h3 style="margin:0 0 8px;">盲盒日志（最新 120 条）</h3>
+        <h3>盲盒日志（最新 120 条）</h3>
         <div id="drawFeed" class="feed"></div>
       </article>
     </section>
@@ -269,6 +316,8 @@
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const sessionId = location.pathname.split('/').pop();
+    const adminKey = new URLSearchParams(location.search).get('k') || '';
+
     const totalEl = document.getElementById('total');
     const checkedEl = document.getElementById('checked');
     const absentEl = document.getElementById('absent');
@@ -290,12 +339,31 @@
     const sRequireCheckin = document.getElementById('sRequireCheckin');
     const sShowWall = document.getElementById('sShowWall');
     const sAnonymous = document.getElementById('sAnonymous');
+    const sObfuscate = document.getElementById('sObfuscate');
     const saveSettingsBtn = document.getElementById('saveSettingsBtn');
     const settingsMsg = document.getElementById('settingsMsg');
+    const clearPrivacyBtn = document.getElementById('clearPrivacyBtn');
+    const auditFeed = document.getElementById('auditFeed');
+    const actorInput = document.getElementById('actorInput');
+    const authTip = document.getElementById('authTip');
+    const badgeWrap = document.getElementById('badgeWrap');
 
     let latest = null;
     let map = null;
     let markerLayer = null;
+
+    const actorStorageKey = `admin_actor_${sessionId}`;
+    actorInput.value = localStorage.getItem(actorStorageKey) || 'teacher';
+    actorInput.addEventListener('input', () => {
+      localStorage.setItem(actorStorageKey, actorInput.value.trim() || 'teacher');
+    });
+
+    if (adminKey) {
+      authTip.textContent = '管理口令已加载，可以进行后台操作。';
+    } else {
+      authTip.textContent = '未检测到管理口令，后台接口将拒绝操作。请使用完整后台链接（带 ?k=...）。';
+      authTip.className = 'small danger';
+    }
 
     function fmt(iso) {
       if (!iso) return '-';
@@ -325,18 +393,33 @@
         .replaceAll("'", '&#39;');
     }
 
+    function authHeaders() {
+      return {
+        'Content-Type': 'application/json',
+        'X-Admin-Key': adminKey,
+        'X-Admin-Actor': actorInput.value.trim() || 'teacher'
+      };
+    }
+
     async function fetchData() {
-      const res = await fetch(`/api/sessions/${sessionId}/admin`);
+      const res = await fetch(`/api/sessions/${sessionId}/admin`, {
+        headers: { 'X-Admin-Key': adminKey }
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '读取失败');
       return data;
     }
 
     async function postJson(url, payload) {
+      const body = {
+        ...(payload || {}),
+        adminKey,
+        actor: actorInput.value.trim() || 'teacher'
+      };
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload || {})
+        headers: authHeaders(),
+        body: JSON.stringify(body)
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '请求失败');
@@ -442,6 +525,28 @@
       `).join('');
     }
 
+    function renderAudit(logs) {
+      if (!Array.isArray(logs) || !logs.length) {
+        auditFeed.innerHTML = '<div class="feed-item small">暂无审计日志</div>';
+        return;
+      }
+      auditFeed.innerHTML = logs.slice(0, 120).map(log => `
+        <div class="feed-item">
+          <div><b>${escapeHtml(log.action)}</b> · ${escapeHtml(log.actor)}</div>
+          <div>${escapeHtml(log.detail || '-')}</div>
+          <div class="small">${escapeHtml(fmt(log.createdAt))} · ${escapeHtml(log.ip || '-')}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderBadges(badges) {
+      if (!Array.isArray(badges) || !badges.length) {
+        badgeWrap.innerHTML = '<span class="small">暂无徽章</span>';
+        return;
+      }
+      badgeWrap.innerHTML = badges.map(b => `<span class="badge">${escapeHtml(b.label)}</span>`).join('');
+    }
+
     function renderPool(pool) {
       if (document.activeElement && document.activeElement.closest('.pool-item')) {
         return;
@@ -489,10 +594,13 @@
       sRequireCheckin.checked = !!data.settings.requireCheckinBeforeDraw;
       sShowWall.checked = !!data.settings.showRealtimeWall;
       sAnonymous.checked = !!data.settings.anonymousWall;
+      sObfuscate.checked = !!data.settings.obfuscateLocation;
 
       renderLeaderboard(data.leaderboard || []);
       renderFeed(data.drawLogs || []);
       renderPool(data.blindboxPool || []);
+      renderAudit(data.auditLogs || []);
+      renderBadges(data.classBadges || []);
       updateMap(data);
     }
 
@@ -546,7 +654,8 @@
         await postJson(`/api/sessions/${sessionId}/settings`, {
           requireCheckinBeforeDraw: sRequireCheckin.checked,
           showRealtimeWall: sShowWall.checked,
-          anonymousWall: sAnonymous.checked
+          anonymousWall: sAnonymous.checked,
+          obfuscateLocation: sObfuscate.checked
         });
         settingsMsg.textContent = '开关保存成功';
         await tick();
@@ -555,6 +664,22 @@
       } finally {
         saveSettingsBtn.disabled = false;
         saveSettingsBtn.textContent = '保存开关';
+      }
+    });
+
+    clearPrivacyBtn.addEventListener('click', async () => {
+      if (!confirm('确定清空全部定位和自拍吗？此操作不可恢复。')) return;
+      clearPrivacyBtn.disabled = true;
+      clearPrivacyBtn.textContent = '清空中...';
+      try {
+        await postJson(`/api/sessions/${sessionId}/privacy/clear`, {});
+        await tick();
+        alert('已清空全部定位和自拍数据');
+      } catch (err) {
+        alert(err.message || '清空失败');
+      } finally {
+        clearPrivacyBtn.disabled = false;
+        clearPrivacyBtn.textContent = '一键清空定位和自拍';
       }
     });
 

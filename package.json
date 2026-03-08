@@ -1,13 +1,13 @@
 {
   "name": "checkin-blindbox-share",
-  "version": "3.0.0",
+  "version": "5.0.0",
   "private": true,
-  "description": "Shareable attendance check-in with blindbox draws",
+  "description": "Shareable attendance check-in with blindbox draws, admin security and analytics",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   }
 }

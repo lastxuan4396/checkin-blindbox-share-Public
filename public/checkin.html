@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>学生签到 + 习惯盲盒 v4.0</title>
+  <title>学生签到 + 习惯盲盒 v5.0</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     :root {
@@ -27,7 +27,7 @@
       color: var(--text);
       padding: 16px;
     }
-    .wrap { max-width: 1060px; margin: 0 auto; }
+    .wrap { max-width: 1120px; margin: 0 auto; }
     .card {
       background: var(--card);
       border: 1px solid var(--line);
@@ -38,6 +38,7 @@
     }
     h1 { margin: 0 0 8px; font-size: 24px; }
     h2 { margin: 0 0 8px; font-size: 20px; }
+    h3 { margin: 0 0 8px; font-size: 16px; }
     p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
     .controls {
       display: grid;
@@ -45,10 +46,10 @@
       gap: 12px;
       margin-top: 10px;
     }
-    .left, .right { min-width: 0; }
-    @media (max-width: 900px) {
+    @media (max-width: 960px) {
       .controls { grid-template-columns: 1fr; }
       .double-grid { grid-template-columns: 1fr; }
+      .draw-actions { grid-template-columns: 1fr; }
     }
     select, textarea, input[type="text"] {
       width: 100%;
@@ -170,7 +171,7 @@
     }
     .double-grid {
       display: grid;
-      grid-template-columns: 1.1fr 0.9fr;
+      grid-template-columns: 1.15fr 0.85fr;
       gap: 12px;
     }
     .blindbox-head {
@@ -202,19 +203,19 @@
       gap: 8px;
       margin-top: 10px;
     }
-    .draw-feed {
-      max-height: 300px;
+    .draw-feed, .history-feed {
+      max-height: 280px;
       overflow: auto;
       border: 1px solid var(--line);
       border-radius: 10px;
       background: #fff;
     }
-    .draw-item {
+    .draw-item, .history-item {
       padding: 10px;
       border-bottom: 1px dashed var(--line);
       font-size: 14px;
     }
-    .draw-item:last-child { border-bottom: 0; }
+    .draw-item:last-child, .history-item:last-child { border-bottom: 0; }
     .draw-meta {
       color: var(--muted);
       font-size: 12px;
@@ -228,6 +229,8 @@
       border: 1px solid var(--line);
       color: #1f2937;
       background: #fff;
+      margin-right: 6px;
+      margin-bottom: 6px;
     }
     .wall-off {
       border: 1px dashed var(--line);
@@ -254,16 +257,23 @@
       margin-top: 8px;
       display: none;
     }
+    .meta-box {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: #fafafa;
+      margin-bottom: 10px;
+    }
   </style>
 </head>
 <body>
   <main class="wrap">
     <section class="card">
-      <h1>学生签到 + 习惯盲盒 v4.0</h1>
-      <p>默认规则：先签到再抽卡。抽卡身份采用口令绑定，防止他人冒名。</p>
+      <h1>学生签到 + 习惯盲盒 v5.0</h1>
+      <p>支持防冒名口令、防刷冷却、挑战完成、分享图、我的历史挑战与班级徽章。</p>
 
       <div class="controls">
-        <div class="left">
+        <div>
           <label class="small" for="nameSelect">选择姓名</label>
           <select id="nameSelect"></select>
           <button id="checkBtn">签到（定位+拍照）</button>
@@ -271,7 +281,7 @@
           <div id="msg" class="msg"></div>
         </div>
 
-        <div class="right">
+        <div>
           <div class="camera-wrap">
             <video id="video" autoplay playsinline muted></video>
             <div class="camera-tip" id="cameraTip">请允许摄像头权限后拍照</div>
@@ -318,6 +328,7 @@
           <button id="drawBtn" class="btn-box" style="width:auto;margin:0;">抽一个搞笑盲盒</button>
         </div>
         <div class="small" id="ruleTip" style="margin-bottom:8px;"></div>
+        <div id="badgesWrap" style="margin-bottom:6px;"></div>
 
         <div id="drawResult" class="draw-result">
           <h3 id="drawTitle" class="draw-title"></h3>
@@ -339,20 +350,24 @@
       </article>
 
       <article class="card">
-        <h2 style="margin-bottom:8px;">挑战排行榜</h2>
+        <h2 style="margin-bottom:8px;">排行榜 + 我的进度</h2>
         <div class="small" id="rankTip" style="margin-bottom:8px;"></div>
+
         <table class="rank-table">
           <thead>
-            <tr>
-              <th>#</th>
-              <th>同学</th>
-              <th>完成</th>
-              <th>抽取</th>
-              <th>完成率</th>
-            </tr>
+            <tr><th>#</th><th>同学</th><th>完成</th><th>抽取</th><th>完成率</th></tr>
           </thead>
           <tbody id="rankBody"></tbody>
         </table>
+
+        <div class="meta-box" style="margin-top:10px;">
+          <div id="myMeta" class="small">我的数据：尚未加载</div>
+          <div id="myStreak" class="small" style="margin-top:4px;">连续完成天数：0</div>
+          <button id="meRefreshBtn" class="btn-outline" style="margin-top:8px;">刷新我的历史</button>
+        </div>
+
+        <div class="small" style="margin-bottom:8px;">我的历史挑战</div>
+        <div id="myHistory" class="history-feed"></div>
       </article>
     </section>
   </main>
@@ -388,6 +403,11 @@
     const rankBody = document.getElementById('rankBody');
     const rankTip = document.getElementById('rankTip');
     const tokenBox = document.getElementById('tokenBox');
+    const badgesWrap = document.getElementById('badgesWrap');
+    const myMeta = document.getElementById('myMeta');
+    const myStreak = document.getElementById('myStreak');
+    const myHistory = document.getElementById('myHistory');
+    const meRefreshBtn = document.getElementById('meRefreshBtn');
 
     let stream = null;
     let capturedPhotoDataUrl = '';
@@ -408,6 +428,11 @@
     function setLocalToken(name, token) {
       if (!name || !token) return;
       localStorage.setItem(tokenStorageKey(name), token);
+    }
+
+    function clearLocalToken(name) {
+      if (!name) return;
+      localStorage.removeItem(tokenStorageKey(name));
     }
 
     function show(text, ok) {
@@ -454,6 +479,14 @@
       }
     }
 
+    function renderClassBadges(badges) {
+      if (!Array.isArray(badges) || !badges.length) {
+        badgesWrap.innerHTML = '<span class="small">班级徽章：暂无</span>';
+        return;
+      }
+      badgesWrap.innerHTML = badges.map(b => `<span class="badge">${escapeHtml(b.label)}</span>`).join('');
+    }
+
     function renderDrawFeed(logs) {
       if (!Array.isArray(logs) || !logs.length) {
         drawFeed.innerHTML = '<div class="draw-item small">还没人抽盲盒，你来当第一个。</div>';
@@ -484,6 +517,30 @@
           <td>${row.drawCount}</td>
           <td>${row.completionRate}%</td>
         </tr>
+      `).join('');
+    }
+
+    function renderMyHistory(payload) {
+      if (!payload) {
+        myMeta.textContent = '我的数据：绑定口令后可查看';
+        myStreak.textContent = '连续完成天数：0';
+        myHistory.innerHTML = '<div class="history-item small">暂无记录</div>';
+        return;
+      }
+      myMeta.textContent = `我的数据：完成 ${payload.completeCount} 次 / 抽取 ${payload.drawCount} 次`;
+      myStreak.textContent = `连续完成天数：${payload.streakDays || 0}`;
+
+      if (!Array.isArray(payload.history) || !payload.history.length) {
+        myHistory.innerHTML = '<div class="history-item small">你还没有抽卡记录</div>';
+        return;
+      }
+
+      myHistory.innerHTML = payload.history.slice(0, 60).map(item => `
+        <div class="history-item">
+          <div><b>${escapeHtml(item.title)}</b> ${item.completed ? '<span class="badge">已完成</span>' : '<span class="badge">待完成</span>'}</div>
+          <div>${escapeHtml(item.detail)}</div>
+          <div class="draw-meta">抽取：${escapeHtml(fmt(item.createdAt))}${item.completedAt ? ` · 完成：${escapeHtml(fmt(item.completedAt))}` : ''}</div>
+        </div>
       `).join('');
     }
 
@@ -634,6 +691,29 @@
       return claimToken(name);
     }
 
+    async function fetchMe(name) {
+      const token = getLocalToken(name);
+      if (!token) {
+        renderMyHistory(null);
+        return;
+      }
+      const res = await fetch(`/api/sessions/${sessionId}/me`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, token })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (res.status === 401) {
+          clearLocalToken(name);
+          refreshTokenStatus();
+          renderMyHistory(null);
+        }
+        throw new Error(data.error || '读取我的历史失败');
+      }
+      renderMyHistory(data);
+    }
+
     function renderBoard(data) {
       latestSession = data;
       const oldSelected = nameSelect.value;
@@ -660,6 +740,7 @@
 
       updateMap(data);
       renderLeaderboard(data.leaderboard || []);
+      renderClassBadges(data.classBadges || []);
 
       if (data.settings.showRealtimeWall) {
         wallWrap.style.display = 'block';
@@ -671,11 +752,11 @@
       }
 
       ruleTip.textContent = data.settings.requireCheckinBeforeDraw
-        ? '当前规则：必须签到后才能抽卡。'
-        : '当前规则：不强制先签到，只要绑定口令即可抽卡。';
+        ? '当前规则：必须签到后才能抽卡（每次抽卡/完成有 2 秒冷却）'
+        : '当前规则：可直接抽卡，但必须先绑定口令（每次抽卡/完成有 2 秒冷却）';
       rankTip.textContent = data.settings.anonymousWall
-        ? '当前为匿名展示模式（排行榜和实时墙已匿名）'
-        : '当前为实名展示模式';
+        ? '排行榜和实时墙已匿名展示'
+        : '排行榜和实时墙为实名展示';
 
       const selected = data.students.find(s => s.name === nameSelect.value);
       checkBtn.disabled = !!(selected && selected.checkedIn);
@@ -695,6 +776,7 @@
         sharePreview.style.display = 'none';
         return;
       }
+
       drawResult.style.display = 'block';
       drawTitle.textContent = draw.title;
       drawDetail.textContent = draw.detail;
@@ -725,9 +807,7 @@
         }
       });
       if (line) lines.push(line);
-      lines.forEach((lineText, idx) => {
-        ctx.fillText(lineText, x, y + idx * lineHeight);
-      });
+      lines.forEach((lineText, idx) => ctx.fillText(lineText, x, y + idx * lineHeight));
       return lines.length;
     }
 
@@ -799,7 +879,7 @@
           });
           return;
         } catch {
-          // user canceled; fallback to download
+          // ignore
         }
       }
 
@@ -820,8 +900,13 @@
       }
     });
 
-    nameSelect.addEventListener('change', () => {
+    nameSelect.addEventListener('change', async () => {
       refreshTokenStatus();
+      try {
+        await fetchMe(nameSelect.value);
+      } catch {
+        // no-op
+      }
     });
 
     checkBtn.addEventListener('click', async () => {
@@ -842,18 +927,12 @@
         const res = await fetch(`/api/sessions/${sessionId}/checkin`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name,
-            location,
-            photoDataUrl: capturedPhotoDataUrl
-          })
+          body: JSON.stringify({ name, location, photoDataUrl: capturedPhotoDataUrl })
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '签到失败');
 
-        if (data.drawToken) {
-          setLocalToken(name, data.drawToken);
-        }
+        if (data.drawToken) setLocalToken(name, data.drawToken);
 
         show('签到成功，已记录位置+自拍，并完成抽卡口令绑定。', true);
         capturedPhotoDataUrl = '';
@@ -861,7 +940,9 @@
         photoPreview.src = '';
         photoStatus.textContent = '未拍照';
         photoStatus.className = 'small missing';
+
         await refreshBoard();
+        await fetchMe(name);
       } catch (err) {
         show(err.message || '签到失败', false);
       } finally {
@@ -888,11 +969,9 @@
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '抽取失败');
 
-        setCurrentDraw(data.drawRaw, {
-          drawCount: data.drawCount,
-          completeCount: data.completeCount
-        });
+        setCurrentDraw(data.drawRaw, { drawCount: data.drawCount, completeCount: data.completeCount });
         await refreshBoard();
+        await fetchMe(name);
       } catch (err) {
         show(err.message || '抽取失败', false);
       } finally {
@@ -919,22 +998,16 @@
         const res = await fetch(`/api/sessions/${sessionId}/complete`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name,
-            token,
-            drawId: currentDraw.id
-          })
+          body: JSON.stringify({ name, token, drawId: currentDraw.id })
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '提交完成失败');
 
         currentDraw.completed = true;
         currentDraw.completedAt = data.completedAt;
-        setCurrentDraw(currentDraw, {
-          drawCount: data.drawCount,
-          completeCount: data.completeCount
-        });
+        setCurrentDraw(currentDraw, { drawCount: data.drawCount, completeCount: data.completeCount });
         await refreshBoard();
+        await fetchMe(name);
         show('挑战完成已记录，排行榜已刷新。', true);
       } catch (err) {
         show(err.message || '提交完成失败', false);
@@ -960,6 +1033,24 @@
       }
     });
 
+    meRefreshBtn.addEventListener('click', async () => {
+      const name = nameSelect.value;
+      if (!name) {
+        show('请先选择名字', false);
+        return;
+      }
+      meRefreshBtn.disabled = true;
+      meRefreshBtn.textContent = '刷新中...';
+      try {
+        await fetchMe(name);
+      } catch (err) {
+        show(err.message || '刷新失败', false);
+      } finally {
+        meRefreshBtn.disabled = false;
+        meRefreshBtn.textContent = '刷新我的历史';
+      }
+    });
+
     async function init() {
       try {
         await startCamera();
@@ -967,9 +1058,14 @@
         cameraTip.textContent = err.message || '摄像头启动失败';
         show('摄像头不可用，无法完成拍照签到', false);
       }
+
       await refreshBoard();
+      await fetchMe(nameSelect.value).catch(() => {});
+
       setInterval(() => {
-        refreshBoard().catch(() => {});
+        refreshBoard()
+          .then(() => fetchMe(nameSelect.value).catch(() => {}))
+          .catch(() => {});
       }, 5000);
     }
 
