@@ -44,3 +44,10 @@ node server.js
 - 如果你想长期保留历史数据，建议每次课后在统计页导出 CSV。
 - 默认同时保存 `app.sqlite`（优先）和 `data.json`（备份），便于迁移和容灾。
 - 如果你使用 Render 免费实例，磁盘仍可能被重置，关键数据建议定期导出。
+
+## GitHub Positioning
+
+- Suggested description: `Shareable classroom check-in app with blindbox draws, admin controls, and lightweight analytics.`
+- Suggested topics: `attendance`, `classroom-tool`, `nodejs`, `admin-panel`, `javascript`, `share-links`
+- Metadata notes: see [`docs/repo-metadata.md`](docs/repo-metadata.md)
+
